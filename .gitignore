@@ -1,3 +1,4 @@
 model
 .python-version
 .venv
+unsloth_compiled_cache
