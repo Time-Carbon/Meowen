@@ -1,0 +1,9 @@
+[project]
+name = "unsloth-qwen3-5"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "unsloth[cu130-torch2100]>=2026.4.8",
+]
