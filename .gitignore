@@ -1,4 +1,6 @@
 model
+lora
 .python-version
 .venv
 unsloth_compiled_cache
+*.swp
