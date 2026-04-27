@@ -15,8 +15,38 @@ from transformers import TrainingArguments
 max_context = 32768 / 2
 model_path = "./model/2B_base_8bit/"
 lora_path = "./lora/"
+dataset_path = "./dataset/"
+
 
 ### Dataset process
+def dataset_loader(dataset_path):
+
+    dataset = load_dataset(
+        path="ecnu-icalk/cmm-math", cache_dir=dataset_path + "dataset/", split="train"
+    )
+
+    return dataset
+
+
+def sftdata_loader(dataset_path):
+
+    sft = load_dataset(path=dataset_path + "sft/", split="train")
+
+    return sft
+
+
+def keyword_loader(dataset_path):
+
+    kaomoji = load_dataset(
+        path="kareudon/kaomoji-tagged",
+        cache_dir=dataset_path + "keyword/",
+        split="train",
+    )
+    emotion = load_dataset(path=dataset_path + "keyword/emotion/", split="train")
+
+    keyword = {"kaomoji": kaomoji.to_dict, "emotion_word": emotion.to_dict}
+
+    return keyword
 
 
 ### Reward functions
@@ -35,6 +65,7 @@ def import_model():
         max_seq_length=max_context,
         dtype=None,
         load_in_8bit=True,
+        load_in_4bit=False,
         use_gradient_checkpointing="unsloth",
         gpu_memory_utilization=0.8,
         fast_inference=False,
@@ -62,12 +93,13 @@ def create_lora(model, rank):
     return lora
 
 
-def dataset_loader():
+def load_data():
 
-    sft = []
-    keyword = []
+    rl = dataset_loader(dataset_path)
+    sft = sftdata_loader(dataset_path)
+    keyword = keyword_loader(dataset_path)
 
-    return sft, keyword
+    return rl, sft, keyword
 
 
 def SFTtrain(lora, tokenizer, dataset, steps, lr, regularization):
@@ -134,3 +166,5 @@ if __name__ == "__main__":
     model, tokenizer = import_model()
 
     lora = create_lora(model, 8)
+
+    rl_dataset, sft_dataset, keyword = load_data()

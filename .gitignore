@@ -5,3 +5,4 @@ lora
 unsloth_compiled_cache
 *.swp
 .vscode
+dataset
