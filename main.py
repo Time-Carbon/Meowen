@@ -16,6 +16,16 @@ max_context = 32768 / 2
 model_path = "./model/2B_base_8bit/"
 lora_path = "./lora/"
 
+### Dataset process
+
+
+### Reward functions
+def reward_func():
+
+    reward = 0
+
+    return reward
+
 
 ### Main process
 def import_model():
@@ -24,7 +34,7 @@ def import_model():
         model_name=model_path,
         max_seq_length=max_context,
         dtype=None,
-        load_in_4bit=True,
+        load_in_8bit=True,
         use_gradient_checkpointing="unsloth",
         gpu_memory_utilization=0.8,
         fast_inference=False,
@@ -33,19 +43,31 @@ def import_model():
     return model, tokenizer
 
 
-def create_lora(model, rank, lora_list):
+def create_lora(model, rank):
 
     lora = FastLanguageModel.get_peft_model(
         model=model,
         r=rank,
-        target_modules=lora_list,
         lora_alpha=2 * rank,
         lora_dropout=0.0,
         bias="none",
         use_gradient_checkpointing="unsloth",
+        ### Trained layers
+        finetune_mlp_modules=True,
+        finetune_attention_modules=True,
+        finetune_language_layers=True,
+        finetune_vision_layers=False,
     )
 
     return lora
+
+
+def dataset_loader():
+
+    sft = []
+    keyword = []
+
+    return sft, keyword
 
 
 def SFTtrain(lora, tokenizer, dataset, steps, lr, regularization):
@@ -59,7 +81,7 @@ def SFTtrain(lora, tokenizer, dataset, steps, lr, regularization):
         fp16=not is_bfloat16_supported(),
         bf16=is_bfloat16_supported(),
         logging_steps=0.1 * steps,
-        optim="adamw_8bit",
+        optim="paged_adamw_8bit",
         weight_decay=regularization,
         lr_scheduler_type="linear",
     )
@@ -82,21 +104,20 @@ def SFTtrain(lora, tokenizer, dataset, steps, lr, regularization):
 def GRPOtrain(lora, dataset, reward_func, lr, steps, regularization):
 
     train_args = GRPOConfig(
-        per_device_train_batch_size= 2,
+        per_device_train_batch_size=2,
         learning_rate=lr,
-        lr_scheduler_type="cosin",
+        lr_scheduler_type="cosine",
         max_steps=steps,
-        warmup_steps= 0.1 * steps,
+        warmup_steps=0.1 * steps,
         optim="paged_adamw_8bit",
-        weight_decay=regularization
+        weight_decay=regularization,
     )
 
     trainer = GRPOTrainer(
-        args=train_args,
-        train_dataset=dataset,
-        reward_funcs=reward_func,
-        model=lora
+        args=train_args, train_dataset=dataset, reward_funcs=reward_func, model=lora
     )
+
+    trainer.train()
 
     return lora
 
@@ -107,17 +128,9 @@ def save_lora(lora, tokenizer):
     tokenizer.save_pretrained(lora_path)
 
 
+### Main function
 if __name__ == "__main__":
 
     model, tokenizer = import_model()
 
-    lora_list = [
-        "q_proj",
-        "k_proj",
-        "v_proj",
-        "o_proj",
-        "gate_proj",
-        "up_proj",
-        "down_proj",
-    ]
-    lora = create_lora(model, 8, lora_list)
+    lora = create_lora(model, 8)
