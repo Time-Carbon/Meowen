@@ -2,6 +2,10 @@
 from unsloth import FastLanguageModel
 from unsloth import is_bfloat16_supported
 import torch
+import os
+
+os.environ["UNSLOTH_VLLM_STANDBY"] = "1"
+
 
 ### Dataset related
 from datasets import load_dataset
@@ -15,7 +19,7 @@ from transformers import TrainingArguments
 
 ### Global data
 max_context: int = 16384
-model_path = "./model/2B_base_8bit/"
+model_path = "./model/qwen3/1.7B_Base_8bit/"
 lora_path = "./lora/"
 dataset_path = "./dataset/"
 
@@ -59,7 +63,7 @@ def think_reward(completions):
 
     for completion in completions:
         content = completion[0]["content"]
-        think_content = re.match("^<think>(.*?)</think>", content, re.DOTALL)
+        think_content = re.match("^<think>(.*?)</think>", content, re.DOTALL).group()
         response_content = content[len(think_content) :]
 
         if len(response_content) == 0 or len(think_content) == 0:
@@ -87,10 +91,10 @@ def keyword_reward(completions):
 
 def reward_func(completions, answer, **kwargs):
 
-    rewards = []
+    output = [[{"content": "<think>\n" + completion}] for completion in completions]
 
-    accuracy_rewards = accuracy_reward(completions, answer)
-    think_rewards = think_reward(completions)
+    accuracy_rewards = accuracy_reward(completions=output, solution=answer)
+    think_rewards = think_reward(output)
 
     rewards = [
         0.5 * (accuracy + think)
@@ -103,20 +107,20 @@ def reward_func(completions, answer, **kwargs):
 ### Main process
 def import_model():
 
-    qwen_template = "\
-        \{\%\ for message in messages \%\}\
-            \{\%\ if message['role'] == 'system' \%\}\
-                \{\{ '<|im_start|>system\n' + message['content'] + '<|im_end|>\n' \}\}\
-            \{\%\ elif message['role'] == 'user' \%\}\
-                \{\{ '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' \}\}\
-            \{\%\ elif message['role'] == 'assistant' \%\}\
-                \{\{ '<|im_start|>assistant\n' + message['content'] + '<|im_end|>\n' \}\}\
-            \{\%\ endif \%\}\
-        \{\%\ endfor \%\}\
-        \{\%\ if add_generation_prompt \%\}\
-            \{\{ '<|im_start|>assistant\n' \}\}\
-        \{\%\ endif \%\}\
-    "
+    qwen_template = """
+{%- for message in messages %}
+    {%- if message['role'] == 'system' %}
+        {{- '<|im_start|>system\n' + message['content'] + '<|im_end|>\n' }}
+    {%- elif message['role'] == 'user' %}
+        {{- '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' }}
+    {%- elif message['role'] == 'assistant' %}
+        {{- '<|im_start|>assistant\n' + message['content'] + '<|im_end|>\n' }}
+    {%- endif %}
+{%- endfor %}
+{%- if add_generation_prompt %}
+    {{- '<|im_start|>assistant\n<think>\n' }}
+{%- endif %}
+"""
 
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=model_path,
@@ -125,8 +129,8 @@ def import_model():
         load_in_8bit=True,
         load_in_4bit=False,
         use_gradient_checkpointing="unsloth",
-        gpu_memory_utilization=0.8,
-        fast_inference=False,
+        gpu_memory_utilization=0.712,
+        fast_inference=True,
     )
 
     tokenizer.chat_template = qwen_template.strip()
@@ -143,11 +147,15 @@ def create_lora(model, rank):
         lora_dropout=0.0,
         bias="none",
         use_gradient_checkpointing="unsloth",
-        ### Trained layers
-        finetune_mlp_modules=True,
-        finetune_attention_modules=True,
-        finetune_language_layers=True,
-        finetune_vision_layers=False,
+        target_modules=[
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_proj",
+            "up_proj",
+            "down_proj",
+        ],
     )
 
     return lora
@@ -164,10 +172,13 @@ def load_data():
 
 def make_RL_conversation(dataset, tokenizer):
 
-    system_prompt = r"你的任务是解决`user`提出的问题，要求讲解答题思路，并将最终答案输出至$\box{}$中"
+    system_prompt = r"\
+        你的任务是解决`user`提出的问题，先在<think></think>中思考，后回答。\
+        要求讲解答题思路，并将最终答案输出至$\box{}$中。\
+        "
 
     prompt = [
-        {"role": "system", "content": system_prompt},
+        {"role": "system", "content": system_prompt.strip()},
         {"role": "user", "content": dataset["question"] + "\n" + dataset["options"]},
     ]
 
@@ -212,9 +223,9 @@ def SFTtrain(lora, tokenizer, dataset, steps, lr, regularization):
 def GRPOtrain(lora, tokenizer, dataset, lr, steps, regularization):
 
     train_args = GRPOConfig(
-        per_device_train_batch_size=1,
+        per_device_train_batch_size=4,
         gradient_accumulation_steps=4,
-        num_generations=2,
+        num_generations=8,
         learning_rate=lr,
         lr_scheduler_type="cosine",
         max_steps=steps,

@@ -6,8 +6,8 @@ from transformers import BitsAndBytesConfig
 
 bnb_config = BitsAndBytesConfig(load_in_8bit=True, bnb_8bit_use_double_quant=True)
 
-model_path = "./model/2B_base_f16"
-save_path = "./model/2B_base_8bit"
+model_path = "./model/qwen3/1.7B_Base/"
+save_path = "./model/qwen3/1.7B_Base_8bit"
 
 tokenizer = AutoTokenizer.from_pretrained(model_path)
 model = AutoModelForCausalLM.from_pretrained(
