@@ -6,7 +6,6 @@ import os
 
 os.environ["UNSLOTH_VLLM_STANDBY"] = "1"
 
-
 ### Dataset related
 from datasets import load_dataset
 import re
@@ -18,8 +17,8 @@ from trl.rewards import accuracy_reward, think_format_reward
 from transformers import TrainingArguments
 
 ### Global data
-max_context: int = 16384
-model_path = "./model/qwen3/1.7B_Base_8bit/"
+max_context: int = 8192
+model_path = "./model/qwen3/1.7B_Base_4bit/"
 lora_path = "./lora/"
 dataset_path = "./dataset/"
 
@@ -63,9 +62,16 @@ def think_reward(completions):
 
     for completion in completions:
         content = completion[0]["content"]
-        think_content = re.match("^<think>(.*?)</think>", content, re.DOTALL).group()
-        response_content = content[len(think_content) :]
+        think_content = re.match("^<think>(.*?)</think>", content, re.DOTALL)
+        response_content = ""
 
+        ### Must have thinking
+        if think_content == None:
+            think_content = ""
+        else:
+            response_content = content[len(think_content) :]
+
+        ### Must both have thinking and responding
         if len(response_content) == 0 or len(think_content) == 0:
             length_rate = 0.1
         else:
@@ -75,9 +81,10 @@ def think_reward(completions):
         if length_rate > 0 and length_rate <= 2:
             ### y = -(1/4)(x^2) + x
             length_reward = -0.25 * (length_rate**2) + length_rate
+
         length_rewards.append(length_reward)
 
-    rewards = [0.5 * (x + y) for x, y in zip(format_rewards, length_reward)]
+    rewards = [0.5 * (x + y) for x, y in zip(format_rewards, length_rewards)]
 
     return rewards
 
@@ -126,10 +133,9 @@ def import_model():
         model_name=model_path,
         max_seq_length=max_context,
         dtype=None,
-        load_in_8bit=True,
-        load_in_4bit=False,
+        load_in_4bit=True,
         use_gradient_checkpointing="unsloth",
-        gpu_memory_utilization=0.712,
+        gpu_memory_utilization=0.6,
         fast_inference=True,
     )
 
@@ -192,14 +198,14 @@ def make_RL_conversation(dataset, tokenizer):
 def SFTtrain(lora, tokenizer, dataset, steps, lr, regularization):
 
     train_args = TrainingArguments(
-        per_device_train_batch_size=2,
+        per_device_train_batch_size=1,
         gradient_accumulation_steps=4,
-        warmup_steps=0.1 * steps,
+        warmup_steps=int(0.1 * steps),
         max_steps=steps,
         learning_rate=lr,
         fp16=not is_bfloat16_supported(),
         bf16=is_bfloat16_supported(),
-        logging_steps=0.1 * steps,
+        logging_steps=int(0.1 * steps),
         optim="paged_adamw_8bit",
         weight_decay=regularization,
         lr_scheduler_type="linear",
@@ -220,19 +226,19 @@ def SFTtrain(lora, tokenizer, dataset, steps, lr, regularization):
     return lora
 
 
-def GRPOtrain(lora, tokenizer, dataset, lr, steps, regularization):
+def GRPOtrain(lora, tokenizer, dataset, lr, steps, regularization, batch):
 
     train_args = GRPOConfig(
-        per_device_train_batch_size=4,
-        gradient_accumulation_steps=4,
-        num_generations=8,
+        per_device_train_batch_size=1,
+        gradient_accumulation_steps=(4 if batch < 4 else batch),
+        num_generations=(2 if batch <= 4 else int(batch / 2)),
         learning_rate=lr,
         lr_scheduler_type="cosine",
         max_steps=steps,
-        warmup_steps=0.1 * steps,
+        warmup_steps=int(0.01 * steps),
         optim="paged_adamw_8bit",
         weight_decay=regularization,
-        logging_steps=0.1 * steps,
+        logging_steps=int(0.01 * steps),
         max_completion_length=max_context,
         temperature=1.0,
         top_p=0.95,
@@ -266,15 +272,22 @@ if __name__ == "__main__":
 
     rl_dataset, sft_dataset, keyword = load_data()
 
-    rl_dataset = rl_dataset.map(
-        function=make_RL_conversation, fn_kwargs={"tokenizer": tokenizer}
+    rl_dataset_col_name = rl_dataset.column_names
+    rl_dataset_mapped = rl_dataset.map(
+        make_RL_conversation,
+        fn_kwargs={"tokenizer": tokenizer},
+        load_from_cache_file=False,
+        remove_columns=rl_dataset_col_name,
     )
 
     GRPOtrain(
         lora=lora,
         tokenizer=tokenizer,
-        dataset=rl_dataset,
-        steps=300,
+        dataset=rl_dataset_mapped,
+        steps=100,
         regularization=0.01,
         lr=5e-6,
+        batch=1,
     )
+
+    save_lora(lora, tokenizer)

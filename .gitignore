@@ -6,3 +6,4 @@ unsloth_compiled_cache
 *.swp
 .vscode
 dataset
+grpo_trainer_lora_model/adapter_config.json
