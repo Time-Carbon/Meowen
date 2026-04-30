@@ -6,6 +6,6 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "math-verify>=0.9.0",
-    "unsloth[cu126-torch290]==2026.2.1",
+    "unsloth[cu126-torch290]==2026.3.18",
     "vllm==0.13.0",
 ]

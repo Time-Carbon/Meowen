@@ -18,7 +18,7 @@ from transformers import TrainingArguments
 
 ### Global data
 max_context: int = 8192
-model_path = "./model/qwen3/1.7B_Base_4bit/"
+model_path = "./model/qwen3/1.7B_Base_8bit/"
 lora_path = "./lora/"
 dataset_path = "./dataset/"
 
@@ -88,6 +88,11 @@ def think_reward(completions):
 
     return rewards
 
+def repetition_penalty(completions):
+
+    penalty = []
+
+    return penalty
 
 def keyword_reward(completions):
 
@@ -228,10 +233,13 @@ def SFTtrain(lora, tokenizer, dataset, steps, lr, regularization):
 
 def GRPOtrain(lora, tokenizer, dataset, lr, steps, regularization, batch):
 
+    generation_steps = 4 if batch < 4 else batch
+
     train_args = GRPOConfig(
         per_device_train_batch_size=1,
-        gradient_accumulation_steps=(4 if batch < 4 else batch),
-        num_generations=(2 if batch <= 4 else int(batch / 2)),
+        num_generations=2,
+        gradient_accumulation_steps=generation_steps,
+        steps_per_generation=generation_steps,
         learning_rate=lr,
         lr_scheduler_type="cosine",
         max_steps=steps,
@@ -242,6 +250,7 @@ def GRPOtrain(lora, tokenizer, dataset, lr, steps, regularization, batch):
         max_completion_length=max_context,
         temperature=1.0,
         top_p=0.95,
+        loss_type="dr_grpo",
     )
 
     trainer = GRPOTrainer(
