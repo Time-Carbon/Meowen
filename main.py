@@ -21,37 +21,69 @@ max_context: int = 8192
 model_path = "./model/qwen3/1.7B_Base_8bit/"
 lora_path = "./lora/"
 dataset_path = "./dataset/"
+sft_dataset_path = dataset_path + "sft/"
+rl_dataset_path = dataset_path + "rl/"
+keyword_dataset_path = dataset_path + "keyword/"
 
 
 ### Dataset process
-def dataset_loader(dataset_path):
-
-    dataset = load_dataset(
-        path="ecnu-icalk/cmm-math", cache_dir=dataset_path + "dataset/", split="train"
-    )
-
-    return dataset
-
-
-def sftdata_loader(dataset_path):
-
-    sft = load_dataset(path=dataset_path + "sft/", split="train")
-
-    return sft
-
-
 def keyword_loader(dataset_path):
 
     kaomoji = load_dataset(
         path="kareudon/kaomoji-tagged",
-        cache_dir=dataset_path + "keyword/",
+        cache_dir=dataset_path,
         split="train",
     )
-    emotion = load_dataset(path=dataset_path + "keyword/emotion/", split="train")
+    emotion = load_dataset(path=dataset_path + "emotion/", split="train")
 
     keyword = {"kaomoji": kaomoji.to_dict, "emotion_word": emotion.to_dict}
 
     return keyword
+
+
+def make_RL_conversation(dataset, tokenizer):
+
+    system_prompt = r"\
+        你的任务是解决`user`提出的问题，先在<think></think>中思考，后回答。\
+        要求讲解答题思路，并将最终答案输出至$\box{}$中。\
+        "
+
+    prompt = [
+        {"role": "system", "content": system_prompt.strip()},
+        {"role": "user", "content": dataset["question"] + "\n" + dataset["options"]},
+    ]
+
+    prompt = tokenizer.apply_chat_template(
+        prompt, tokenize=False, add_generation_prompt=True
+    )
+
+    return {"prompt": prompt, "answer": dataset["answer"]}
+
+
+def make_SFT_conversation(dataset, tokenizer):
+
+    system_prompt = r"\
+        你的任务是解决`user`提出的问题，先在<think></think>中思考，后回答。\
+        要求讲解答题思路，并将最终答案输出至$\box{}$中。\
+        "
+
+    prompt = [
+        {"role": "system", "content": system_prompt.strip()},
+        {"role": "user", "content": dataset["query"]},
+        {
+            "role": "assistant",
+            "content": "<think>\n\n"
+            + dataset["think"]
+            + "</think>\n\n"
+            + dataset["response"],
+        },
+    ]
+
+    prompt = tokenizer.apply_chat_template(
+        prompt, tokenize=False, add_generation_prompt=True
+    )
+
+    return {"prompt": prompt}
 
 
 ### Reward functions
@@ -88,11 +120,13 @@ def think_reward(completions):
 
     return rewards
 
+
 def repetition_penalty(completions):
 
     penalty = []
 
     return penalty
+
 
 def keyword_reward(completions):
 
@@ -120,25 +154,26 @@ def reward_func(completions, answer, **kwargs):
 def import_model():
 
     qwen_template = """
-{%- for message in messages %}
-    {%- if message['role'] == 'system' %}
-        {{- '<|im_start|>system\n' + message['content'] + '<|im_end|>\n' }}
-    {%- elif message['role'] == 'user' %}
-        {{- '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' }}
-    {%- elif message['role'] == 'assistant' %}
-        {{- '<|im_start|>assistant\n' + message['content'] + '<|im_end|>\n' }}
-    {%- endif %}
-{%- endfor %}
-{%- if add_generation_prompt %}
-    {{- '<|im_start|>assistant\n<think>\n' }}
-{%- endif %}
-"""
+        {%- for message in messages %}
+            {%- if message['role'] == 'system' %}
+                {{- '<|im_start|>system\n' + message['content'] + '<|im_end|>\n' }}
+            {%- elif message['role'] == 'user' %}
+                {{- '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' }}
+            {%- elif message['role'] == 'assistant' %}
+                {{- '<|im_start|>assistant\n' + message['content'] + '<|im_end|>\n' }}
+            {%- endif %}
+        {%- endfor %}
+        {%- if add_generation_prompt %}
+            {{- '<|im_start|>assistant\n<think>\n' }}
+        {%- endif %}
+    """
 
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=model_path,
         max_seq_length=max_context,
         dtype=None,
-        load_in_4bit=True,
+        load_in_4bit=False,
+        load_in_8bit=True,
         use_gradient_checkpointing="unsloth",
         gpu_memory_utilization=0.6,
         fast_inference=True,
@@ -172,55 +207,60 @@ def create_lora(model, rank):
     return lora
 
 
-def load_data():
+def load_data(tokenizer, load_from_cache=False):
 
-    rl = dataset_loader(dataset_path)
-    sft = sftdata_loader(dataset_path)
-    keyword = keyword_loader(dataset_path)
+    rl = []
+    sft = []
+    keyword = []
+
+    rl = load_dataset(
+        path="ecnu-icalk/cmm-math", cache_dir=rl_dataset_path, split="train"
+    )
+    sft = load_dataset(path=sft_dataset_path, split="train")
+    # keyword = keyword_loader(keyword_dataset_path)
+
+    ### Remap RL dataset
+    rl_dataset_col_name = rl.column_names
+    rl = rl.map(
+        make_RL_conversation,
+        fn_kwargs={"tokenizer": tokenizer},
+        load_from_cache_file=load_from_cache,
+        remove_columns=rl_dataset_col_name,
+    )
+
+    ### Remap SFT dataset
+    sft_dataset_col_name = sft.column_names
+    sft = sft.map(
+        make_SFT_conversation,
+        fn_kwargs={"tokenizer": tokenizer},
+        load_from_cache_file=load_from_cache,
+        remove_columns=sft_dataset_col_name,
+    )
 
     return rl, sft, keyword
 
 
-def make_RL_conversation(dataset, tokenizer):
-
-    system_prompt = r"\
-        你的任务是解决`user`提出的问题，先在<think></think>中思考，后回答。\
-        要求讲解答题思路，并将最终答案输出至$\box{}$中。\
-        "
-
-    prompt = [
-        {"role": "system", "content": system_prompt.strip()},
-        {"role": "user", "content": dataset["question"] + "\n" + dataset["options"]},
-    ]
-
-    prompt = tokenizer.apply_chat_template(
-        prompt, tokenize=False, add_generation_prompt=True
-    )
-
-    return {"prompt": prompt, "answer": dataset["answer"]}
-
-
-def SFTtrain(lora, tokenizer, dataset, steps, lr, regularization):
+def SFTtrain(lora, tokenizer, dataset, steps, lr, regularization, batch):
 
     train_args = TrainingArguments(
         per_device_train_batch_size=1,
-        gradient_accumulation_steps=4,
-        warmup_steps=int(0.1 * steps),
+        gradient_accumulation_steps=batch,
+        warmup_steps=int(0.01 * steps),
         max_steps=steps,
         learning_rate=lr,
         fp16=not is_bfloat16_supported(),
         bf16=is_bfloat16_supported(),
-        logging_steps=int(0.1 * steps),
+        logging_steps=int(0.01 * steps),
         optim="paged_adamw_8bit",
         weight_decay=regularization,
-        lr_scheduler_type="linear",
+        lr_scheduler_type="cosine",
     )
 
     trainer = SFTTrainer(
         model=lora,
         tokenizer=tokenizer,
         train_dataset=dataset,
-        dataset_text_field="text",
+        dataset_text_field="prompt",
         max_seq_length=max_context,
         packing=False,
         args=train_args,
@@ -279,24 +319,26 @@ if __name__ == "__main__":
 
     lora = create_lora(model, 8)
 
-    rl_dataset, sft_dataset, keyword = load_data()
+    rl_dataset, sft_dataset, keyword = load_data(tokenizer)
 
-    rl_dataset_col_name = rl_dataset.column_names
-    rl_dataset_mapped = rl_dataset.map(
-        make_RL_conversation,
-        fn_kwargs={"tokenizer": tokenizer},
-        load_from_cache_file=False,
-        remove_columns=rl_dataset_col_name,
-    )
-
-    GRPOtrain(
+    SFTtrain(
         lora=lora,
         tokenizer=tokenizer,
-        dataset=rl_dataset_mapped,
-        steps=100,
-        regularization=0.01,
-        lr=5e-6,
-        batch=1,
+        dataset=sft_dataset,
+        steps=3,
+        lr=1e-4,
+        regularization=1e-2,
+        batch=4,
     )
+
+    # GRPOtrain(
+    #     lora=lora,
+    #     tokenizer=tokenizer,
+    #     dataset=rl_dataset,
+    #     steps=100,
+    #     regularization=0.01,
+    #     lr=5e-6,
+    #     batch=1,
+    # )
 
     save_lora(lora, tokenizer)
