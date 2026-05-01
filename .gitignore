@@ -6,4 +6,9 @@ unsloth_compiled_cache
 *.swp
 .vscode
 dataset
-grpo_trainer_lora_model/adapter_config.json
+grpo_trainer_lora_model
+unsloth_training_checkpoints
+lora_to_gguf.py
+hf_to_gguf.py
+__pycache__
+trainer_output

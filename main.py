@@ -1,4 +1,6 @@
 ### Unsloth related
+import string
+
 from unsloth import FastLanguageModel
 from unsloth import is_bfloat16_supported
 import torch
@@ -11,13 +13,13 @@ from datasets import load_dataset
 import re
 
 ### Train related
-from trl import SFTTrainer
+from trl import SFTTrainer, SFTConfig
 from trl import GRPOTrainer, GRPOConfig
 from trl.rewards import accuracy_reward, think_format_reward
-from transformers import TrainingArguments
 
 ### Global data
-max_context: int = 8192
+max_RL_context = 8192
+max_SFT_context = 1
 model_path = "./model/qwen3/1.7B_Base_8bit/"
 lora_path = "./lora/"
 dataset_path = "./dataset/"
@@ -64,18 +66,14 @@ def make_SFT_conversation(dataset, tokenizer):
 
     system_prompt = r"\
         你的任务是解决`user`提出的问题，先在<think></think>中思考，后回答。\
-        要求讲解答题思路，并将最终答案输出至$\box{}$中。\
         "
 
     prompt = [
         {"role": "system", "content": system_prompt.strip()},
-        {"role": "user", "content": dataset["query"]},
+        {"role": "user", "content": dataset["user"]},
         {
             "role": "assistant",
-            "content": "<think>\n\n"
-            + dataset["think"]
-            + "</think>\n\n"
-            + dataset["response"],
+            "content": dataset["assistant"],
         },
     ]
 
@@ -83,7 +81,11 @@ def make_SFT_conversation(dataset, tokenizer):
         prompt, tokenize=False, add_generation_prompt=True
     )
 
-    return {"prompt": prompt}
+    global max_SFT_context
+    if max_SFT_context < len(prompt):
+        max_SFT_context = len(prompt)
+
+    return {"text": prompt}
 
 
 ### Reward functions
@@ -151,31 +153,31 @@ def reward_func(completions, answer, **kwargs):
 
 
 ### Main process
-def import_model():
+def import_model(model_path, mem_usage):
 
     qwen_template = """
-        {%- for message in messages %}
-            {%- if message['role'] == 'system' %}
-                {{- '<|im_start|>system\n' + message['content'] + '<|im_end|>\n' }}
-            {%- elif message['role'] == 'user' %}
-                {{- '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' }}
-            {%- elif message['role'] == 'assistant' %}
-                {{- '<|im_start|>assistant\n' + message['content'] + '<|im_end|>\n' }}
-            {%- endif %}
-        {%- endfor %}
-        {%- if add_generation_prompt %}
-            {{- '<|im_start|>assistant\n<think>\n' }}
-        {%- endif %}
-    """
+{%- for message in messages -%}
+    {%- if message['role'] == 'system' -%}
+        {{- '<|im_start|>system\n' + message['content'] + '<|im_end|>\n' -}}
+    {%- elif message['role'] == 'user' -%}
+        {{- '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' -}}
+    {%- elif message['role'] == 'assistant' -%}
+        {{- '<|im_start|>assistant\n' + message['content'] + '<|im_end|>\n' -}}
+    {%- endif -%}
+{%- endfor -%}
+{%- if add_generation_prompt -%}
+    {{- '<|im_start|>assistant\n<think>\n' -}}
+{%- endif -%}
+"""
 
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=model_path,
-        max_seq_length=max_context,
+        max_seq_length=max_RL_context,
         dtype=None,
         load_in_4bit=False,
         load_in_8bit=True,
         use_gradient_checkpointing="unsloth",
-        gpu_memory_utilization=0.6,
+        gpu_memory_utilization=mem_usage,
         fast_inference=True,
     )
 
@@ -213,6 +215,7 @@ def load_data(tokenizer, load_from_cache=False):
     sft = []
     keyword = []
 
+    ### Load raw Dataset
     rl = load_dataset(
         path="ecnu-icalk/cmm-math", cache_dir=rl_dataset_path, split="train"
     )
@@ -242,26 +245,27 @@ def load_data(tokenizer, load_from_cache=False):
 
 def SFTtrain(lora, tokenizer, dataset, steps, lr, regularization, batch):
 
-    train_args = TrainingArguments(
+    train_args = SFTConfig(
         per_device_train_batch_size=1,
         gradient_accumulation_steps=batch,
-        warmup_steps=int(0.01 * steps),
+        warmup_ratio=0.01,
         max_steps=steps,
         learning_rate=lr,
         fp16=not is_bfloat16_supported(),
         bf16=is_bfloat16_supported(),
-        logging_steps=int(0.01 * steps),
+        logging_steps=1,
         optim="paged_adamw_8bit",
         weight_decay=regularization,
         lr_scheduler_type="cosine",
+        max_length=max_SFT_context,
     )
 
     trainer = SFTTrainer(
         model=lora,
         tokenizer=tokenizer,
         train_dataset=dataset,
-        dataset_text_field="prompt",
-        max_seq_length=max_context,
+        dataset_text_field="text",
+        max_seq_length=max_SFT_context,
         packing=False,
         args=train_args,
     )
@@ -286,8 +290,8 @@ def GRPOtrain(lora, tokenizer, dataset, lr, steps, regularization, batch):
         warmup_steps=int(0.01 * steps),
         optim="paged_adamw_8bit",
         weight_decay=regularization,
-        logging_steps=int(0.01 * steps),
-        max_completion_length=max_context,
+        logging_steps=1,
+        max_completion_length=max_RL_context,
         temperature=1.0,
         top_p=0.95,
         loss_type="dr_grpo",
@@ -315,20 +319,20 @@ def save_lora(lora, tokenizer):
 ### Main function
 if __name__ == "__main__":
 
-    model, tokenizer = import_model()
+    model, tokenizer = import_model(model_path, 0.95)
 
     lora = create_lora(model, 8)
 
-    rl_dataset, sft_dataset, keyword = load_data(tokenizer)
+    rl_dataset, sft_dataset, keyword = load_data(tokenizer, load_from_cache=True)
 
     SFTtrain(
         lora=lora,
         tokenizer=tokenizer,
         dataset=sft_dataset,
-        steps=3,
-        lr=1e-4,
+        steps=50,
+        lr=1e-3,
         regularization=1e-2,
-        batch=4,
+        batch=8,
     )
 
     # GRPOtrain(
@@ -342,3 +346,4 @@ if __name__ == "__main__":
     # )
 
     save_lora(lora, tokenizer)
+    torch.distributed.destroy_process_group()
