@@ -123,6 +123,31 @@ def think_reward(completions):
     return rewards
 
 
+def language_reward(completions):
+
+    rewards = []
+
+    for completion in completions:
+        total_len = len(completion[0]["content"])
+        target_language_lenght = 0
+
+        for char in completion[0]["content"]:
+            if (
+                char >= "\u4e00" and char <= "\u9fff"
+            ):  ### compare char with the Unicode range of Chinese
+                target_language_lenght += 1
+
+        if total_len != 0:
+            lenght_rate = target_language_lenght / total_len
+            reward = -4 * (lenght_rate**2) + 4 * lenght_rate
+        else:
+            reward = 0.1
+
+        rewards.append(reward)
+
+    return rewards
+
+
 def repetition_penalty(completions):
 
     penalty = []
@@ -143,10 +168,11 @@ def reward_func(completions, answer, **kwargs):
 
     accuracy_rewards = accuracy_reward(completions=output, solution=answer)
     think_rewards = think_reward(output)
+    language_rewards = language_reward(output)
 
     rewards = [
-        0.5 * (accuracy + think)
-        for accuracy, think in zip(accuracy_rewards, think_rewards)
+        0.45 * (accuracy + think) + 0.1 * language
+        for accuracy, think, language in zip(accuracy_rewards, think_rewards, language_rewards)
     ]
 
     return rewards
@@ -329,21 +355,25 @@ if __name__ == "__main__":
         lora=lora,
         tokenizer=tokenizer,
         dataset=sft_dataset,
-        steps=50,
-        lr=1e-3,
+        steps=100,
+        lr=1e-4,
         regularization=1e-2,
         batch=8,
     )
 
-    # GRPOtrain(
-    #     lora=lora,
-    #     tokenizer=tokenizer,
-    #     dataset=rl_dataset,
-    #     steps=100,
-    #     regularization=0.01,
-    #     lr=5e-6,
-    #     batch=1,
-    # )
+    save_lora(lora, tokenizer)
+
+    lora, tokenizer = import_model(lora_path, 0.5)
+
+    GRPOtrain(
+        lora=lora,
+        tokenizer=tokenizer,
+        dataset=rl_dataset,
+        steps=100,
+        regularization=0.01,
+        lr=5e-6,
+        batch=1,
+    )
 
     save_lora(lora, tokenizer)
     torch.distributed.destroy_process_group()
