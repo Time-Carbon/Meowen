@@ -1,6 +1,4 @@
 ### Unsloth related
-import string
-
 from unsloth import FastLanguageModel
 from unsloth import is_bfloat16_supported
 import torch
@@ -96,7 +94,7 @@ def think_reward(completions):
 
     for completion in completions:
         content = completion[0]["content"]
-        think_content = re.match("^<think>(.*?)</think>", content, re.DOTALL)
+        think_content = re.match("^<think>(.*?)</think>", content, re.DOTALL).group()
         response_content = ""
 
         ### Must have thinking
@@ -270,8 +268,8 @@ def load_data(tokenizer, load_from_cache=False):
 def SFTtrain(lora, tokenizer, dataset, steps, lr, regularization, batch):
 
     train_args = SFTConfig(
-        per_device_train_batch_size=1,
-        gradient_accumulation_steps=batch,
+        per_device_train_batch_size=2,
+        gradient_accumulation_steps=int(batch / 2),
         warmup_steps=1,
         max_steps=steps,
         learning_rate=lr,
@@ -282,6 +280,7 @@ def SFTtrain(lora, tokenizer, dataset, steps, lr, regularization, batch):
         weight_decay=regularization,
         lr_scheduler_type="cosine",
         max_length=max_SFT_context,
+        max_grad_norm=1.0,
     )
 
     trainer = SFTTrainer(
@@ -304,10 +303,10 @@ def GRPOtrain(lora, tokenizer, dataset, lr, steps, regularization, batch):
     generation_steps = 4 if batch < 4 else batch
 
     train_args = GRPOConfig(
-        per_device_train_batch_size=1,
+        per_device_train_batch_size=2,
         num_generations=2,
-        gradient_accumulation_steps=generation_steps,
-        steps_per_generation=generation_steps,
+        gradient_accumulation_steps=int(generation_steps / 2),
+        steps_per_generation=int(generation_steps / 2),
         learning_rate=lr,
         lr_scheduler_type="cosine",
         max_steps=steps,
@@ -319,6 +318,10 @@ def GRPOtrain(lora, tokenizer, dataset, lr, steps, regularization, batch):
         temperature=1.0,
         top_p=0.95,
         loss_type="dr_grpo",
+        save_strategy="steps",
+        save_steps=10,
+        save_total_limit=3,
+        output_dir=lora_path,
     )
 
     trainer = GRPOTrainer(
@@ -353,8 +356,8 @@ if __name__ == "__main__":
         lora=lora,
         tokenizer=tokenizer,
         dataset=sft_dataset,
-        steps=20,
-        lr=5e-4,
+        steps=60,
+        lr=1e-4,
         regularization=1e-2,
         batch=8,
     )
@@ -363,9 +366,9 @@ if __name__ == "__main__":
         lora=lora,
         tokenizer=tokenizer,
         dataset=rl_dataset,
-        steps=100,
+        steps=300,
         regularization=0.01,
-        lr=1e-5,
+        lr=1e-4,
         batch=4,
     )
 
