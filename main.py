@@ -6,6 +6,8 @@ from unsloth import is_bfloat16_supported
 import torch
 import os
 
+from vllm import lora
+
 os.environ["UNSLOTH_VLLM_STANDBY"] = "1"
 
 ### Dataset related
@@ -172,14 +174,16 @@ def reward_func(completions, answer, **kwargs):
 
     rewards = [
         0.45 * (accuracy + think) + 0.1 * language
-        for accuracy, think, language in zip(accuracy_rewards, think_rewards, language_rewards)
+        for accuracy, think, language in zip(
+            accuracy_rewards, think_rewards, language_rewards
+        )
     ]
 
     return rewards
 
 
 ### Main process
-def import_model(model_path, mem_usage):
+def import_model(model_path, mem_usage, load_to_vllm):
 
     qwen_template = """
 {%- for message in messages -%}
@@ -204,7 +208,7 @@ def import_model(model_path, mem_usage):
         load_in_8bit=True,
         use_gradient_checkpointing="unsloth",
         gpu_memory_utilization=mem_usage,
-        fast_inference=True,
+        fast_inference=load_to_vllm,
     )
 
     tokenizer.chat_template = qwen_template.strip()
@@ -274,7 +278,7 @@ def SFTtrain(lora, tokenizer, dataset, steps, lr, regularization, batch):
     train_args = SFTConfig(
         per_device_train_batch_size=1,
         gradient_accumulation_steps=batch,
-        warmup_ratio=0.01,
+        warmup_steps=1,
         max_steps=steps,
         learning_rate=lr,
         fp16=not is_bfloat16_supported(),
@@ -313,7 +317,7 @@ def GRPOtrain(lora, tokenizer, dataset, lr, steps, regularization, batch):
         learning_rate=lr,
         lr_scheduler_type="cosine",
         max_steps=steps,
-        warmup_steps=int(0.01 * steps),
+        warmup_steps=1,
         optim="paged_adamw_8bit",
         weight_decay=regularization,
         logging_steps=1,
@@ -345,25 +349,27 @@ def save_lora(lora, tokenizer):
 ### Main function
 if __name__ == "__main__":
 
-    model, tokenizer = import_model(model_path, 0.95)
+    model, tokenizer = import_model(model_path, 0.95, False)
 
-    lora = create_lora(model, 8)
+    # lora = create_lora(model, 8)
 
     rl_dataset, sft_dataset, keyword = load_data(tokenizer, load_from_cache=True)
 
-    SFTtrain(
-        lora=lora,
-        tokenizer=tokenizer,
-        dataset=sft_dataset,
-        steps=100,
-        lr=1e-4,
-        regularization=1e-2,
-        batch=8,
-    )
+    # SFTtrain(
+    #     lora=lora,
+    #     tokenizer=tokenizer,
+    #     dataset=sft_dataset,
+    #     steps=20,
+    #     lr=5e-4,
+    #     regularization=1e-2,
+    #     batch=8,
+    # )
 
-    save_lora(lora, tokenizer)
-
-    lora, tokenizer = import_model(lora_path, 0.5)
+    ### Save lora to prepare for RL train
+    # save_lora(lora, tokenizer)
+    torch.cuda.empty_cache()
+    del model, tokenizer, lora
+    lora, tokenizer = import_model(lora_path, 0.5, True)
 
     GRPOtrain(
         lora=lora,
@@ -371,8 +377,8 @@ if __name__ == "__main__":
         dataset=rl_dataset,
         steps=100,
         regularization=0.01,
-        lr=5e-6,
-        batch=1,
+        lr=1e-5,
+        batch=8,
     )
 
     save_lora(lora, tokenizer)
