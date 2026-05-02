@@ -6,9 +6,7 @@ from unsloth import is_bfloat16_supported
 import torch
 import os
 
-from vllm import lora
-
-os.environ["UNSLOTH_VLLM_STANDBY"] = "1"
+# os.environ["UNSLOTH_VLLM_STANDBY"] = "1"
 
 ### Dataset related
 from datasets import load_dataset
@@ -22,7 +20,7 @@ from trl.rewards import accuracy_reward, think_format_reward
 ### Global data
 max_RL_context = 8192
 max_SFT_context = 1
-model_path = "./model/qwen3/1.7B_Base_8bit/"
+model_path = "./model/qwen3.5/2B_base_8bit/"
 lora_path = "./lora/"
 dataset_path = "./dataset/"
 sft_dataset_path = dataset_path + "sft/"
@@ -225,15 +223,11 @@ def create_lora(model, rank):
         lora_dropout=0.0,
         bias="none",
         use_gradient_checkpointing="unsloth",
-        target_modules=[
-            "q_proj",
-            "k_proj",
-            "v_proj",
-            "o_proj",
-            "gate_proj",
-            "up_proj",
-            "down_proj",
-        ],
+        ### Train language model
+        finetune_vision_layers=False,
+        finetune_language_layers=True,
+        finetune_attention_modules=True,
+        finetune_mlp_modules=True,
     )
 
     return lora
@@ -351,25 +345,19 @@ if __name__ == "__main__":
 
     model, tokenizer = import_model(model_path, 0.95, False)
 
-    # lora = create_lora(model, 8)
+    lora = create_lora(model, 8)
 
     rl_dataset, sft_dataset, keyword = load_data(tokenizer, load_from_cache=True)
 
-    # SFTtrain(
-    #     lora=lora,
-    #     tokenizer=tokenizer,
-    #     dataset=sft_dataset,
-    #     steps=20,
-    #     lr=5e-4,
-    #     regularization=1e-2,
-    #     batch=8,
-    # )
-
-    ### Save lora to prepare for RL train
-    # save_lora(lora, tokenizer)
-    torch.cuda.empty_cache()
-    del model, tokenizer, lora
-    lora, tokenizer = import_model(lora_path, 0.5, True)
+    SFTtrain(
+        lora=lora,
+        tokenizer=tokenizer,
+        dataset=sft_dataset,
+        steps=20,
+        lr=5e-4,
+        regularization=1e-2,
+        batch=8,
+    )
 
     GRPOtrain(
         lora=lora,
@@ -378,7 +366,7 @@ if __name__ == "__main__":
         steps=100,
         regularization=0.01,
         lr=1e-5,
-        batch=8,
+        batch=4,
     )
 
     save_lora(lora, tokenizer)
