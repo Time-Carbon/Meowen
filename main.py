@@ -15,6 +15,9 @@ from trl import SFTTrainer, SFTConfig
 from trl import GRPOTrainer, GRPOConfig
 from trl.rewards import accuracy_reward, think_format_reward
 
+### Arg related
+import argparse
+
 ### Global data
 max_RL_context = 8192
 max_SFT_context = 1
@@ -346,31 +349,42 @@ def save_lora(lora, tokenizer):
 ### Main function
 if __name__ == "__main__":
 
-    model, tokenizer = import_model(model_path, 0.95, False)
+    parser = argparse.ArgumentParser(description="Select train mode")
+    parser.add_argument("-m", "--mode", type=str, help="Supported mode: sft, rl")
+    args = parser.parse_args()
 
-    lora = create_lora(model, 8)
+    if args.mode == "sft":
 
-    rl_dataset, sft_dataset, keyword = load_data(tokenizer, load_from_cache=True)
+        model, tokenizer = import_model(model_path, 0.95, False)
 
-    SFTtrain(
-        lora=lora,
-        tokenizer=tokenizer,
-        dataset=sft_dataset,
-        steps=60,
-        lr=1e-4,
-        regularization=1e-2,
-        batch=8,
-    )
+        lora = create_lora(model, 8)
 
-    GRPOtrain(
-        lora=lora,
-        tokenizer=tokenizer,
-        dataset=rl_dataset,
-        steps=300,
-        regularization=0.01,
-        lr=1e-4,
-        batch=4,
-    )
+        rl_dataset, sft_dataset, keyword = load_data(tokenizer, load_from_cache=True)
 
-    save_lora(lora, tokenizer)
-    torch.distributed.destroy_process_group()
+        SFTtrain(
+            lora=lora,
+            tokenizer=tokenizer,
+            dataset=sft_dataset,
+            steps=60,
+            lr=1e-4,
+            regularization=1e-2,
+            batch=8,
+        )
+        save_lora(lora, tokenizer)
+
+    elif args.mode == "rl":
+        
+        lora, tokenizer = import_model(lora_path, 0.5, False)
+        rl_dataset, sft_dataset, keyword = load_data(tokenizer, load_from_cache=True)
+
+        GRPOtrain(
+            lora=lora,
+            tokenizer=tokenizer,
+            dataset=rl_dataset,
+            steps=300,
+            regularization=0.01,
+            lr=1e-4,
+            batch=4,
+        )
+        save_lora(lora, tokenizer)
+        torch.distributed.destroy_process_group()
