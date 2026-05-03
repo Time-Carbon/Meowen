@@ -4,7 +4,7 @@ from unsloth import is_bfloat16_supported
 import torch
 import os
 
-# os.environ["UNSLOTH_VLLM_STANDBY"] = "1"
+os.environ["UNSLOTH_VLLM_STANDBY"] = "1"
 
 ### Dataset related
 from datasets import load_dataset
@@ -21,7 +21,7 @@ import argparse
 ### Global data
 max_RL_context = 8192
 max_SFT_context = 1
-model_path = "./model/qwen3.5/2B_base_8bit/"
+model_path = "./model/qwen3/1.7B_Base_8bit/"
 lora_path = "./lora/"
 dataset_path = "./dataset/"
 sft_dataset_path = dataset_path + "sft/"
@@ -225,10 +225,15 @@ def create_lora(model, rank):
         bias="none",
         use_gradient_checkpointing="unsloth",
         ### Train language model
-        finetune_vision_layers=False,
-        finetune_language_layers=True,
-        finetune_attention_modules=True,
-        finetune_mlp_modules=True,
+        target_modules=[
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_proj",
+            "up_proj",
+            "down_proj",
+        ],
     )
 
     return lora
@@ -373,8 +378,8 @@ if __name__ == "__main__":
         save_lora(lora, tokenizer)
 
     elif args.mode == "rl":
-        
-        lora, tokenizer = import_model(lora_path, 0.5, False)
+
+        lora, tokenizer = import_model(lora_path, 0.5, True)
         rl_dataset, sft_dataset, keyword = load_data(tokenizer, load_from_cache=True)
 
         GRPOtrain(
