@@ -19,7 +19,7 @@ from trl.rewards import accuracy_reward, think_format_reward
 import argparse
 
 ### Global data
-max_RL_context = 8192
+max_RL_context = 4096
 max_SFT_context = 1
 model_path = "./model/qwen3/1.7B_Base_8bit/"
 lora_path = "./lora/"
@@ -47,7 +47,7 @@ def keyword_loader(dataset_path):
 def make_RL_conversation(dataset, tokenizer):
 
     system_prompt = r"\
-        你的任务是解决`user`提出的问题，先在<think></think>中思考，后回答。\
+        你的任务是解决`user`提出的问题，先在<think></think>中思考，然后用猫娘的语气回答。\
         要求讲解答题思路，并将最终答案输出至$\box{}$中。\
         "
 
@@ -79,7 +79,7 @@ def make_SFT_conversation(dataset, tokenizer):
     ]
 
     prompt = tokenizer.apply_chat_template(
-        prompt, tokenize=False, add_generation_prompt=True
+        prompt, tokenize=False, add_generation_prompt=False
     )
 
     global max_SFT_context
@@ -97,13 +97,14 @@ def think_reward(completions):
 
     for completion in completions:
         content = completion[0]["content"]
-        think_content = re.match("^<think>(.*?)</think>", content, re.DOTALL).group()
+        think_content = re.match("^<think>(.*?)</think>", content, re.DOTALL)
         response_content = ""
 
         ### Must have thinking
         if think_content == None:
             think_content = ""
         else:
+            think_content = think_content.group()
             response_content = content[len(think_content) :]
 
         ### Must both have thinking and responding
@@ -360,9 +361,7 @@ if __name__ == "__main__":
 
     if args.mode == "sft":
 
-        model, tokenizer = import_model(model_path, 0.95, False)
-
-        lora = create_lora(model, 8)
+        lora, tokenizer = import_model(lora_path, 0.95, False)
 
         rl_dataset, sft_dataset, keyword = load_data(tokenizer, load_from_cache=True)
 
@@ -370,8 +369,8 @@ if __name__ == "__main__":
             lora=lora,
             tokenizer=tokenizer,
             dataset=sft_dataset,
-            steps=60,
-            lr=1e-4,
+            steps=100,
+            lr=5e-4,
             regularization=1e-2,
             batch=8,
         )
@@ -379,7 +378,9 @@ if __name__ == "__main__":
 
     elif args.mode == "rl":
 
-        lora, tokenizer = import_model(lora_path, 0.5, True)
+        model, tokenizer = import_model(model_path, 0.5, True)
+
+        lora = create_lora(model, 8)
         rl_dataset, sft_dataset, keyword = load_data(tokenizer, load_from_cache=True)
 
         GRPOtrain(
