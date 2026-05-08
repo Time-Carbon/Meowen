@@ -1,4 +1,4 @@
-model
+qwen_model
 lora
 .python-version
 .venv
@@ -12,4 +12,3 @@ lora_to_gguf.py
 hf_to_gguf.py
 __pycache__
 trainer_output
-causal_conv1d-1.6.1+cu12torch2.10cxx11abiTRUE-cp310-cp310-linux_x86_64.whl
