@@ -1,27 +1,22 @@
 ### Unsloth related
-from unsloth import FastLanguageModel
-from unsloth import is_bfloat16_supported
+import unsloth
 import torch
-import os
-
-os.environ["UNSLOTH_VLLM_STANDBY"] = "1"
 
 ### Dataset related
-from datasets import load_dataset
 import re
 
 ### Train related
-from trl import SFTTrainer, SFTConfig
-from trl import GRPOTrainer, GRPOConfig
 from trl.rewards import accuracy_reward, think_format_reward
 
 ### Arg related
 import argparse
 
+import unsloth_model as um
+
 ### Global data
 max_RL_context = 4096
 max_SFT_context = 1
-model_path = "./model/qwen3/1.7B_Base_8bit/"
+model_path = "./qwen_model/qwen3/1.7B_Base_8bit/"
 lora_path = "./lora/"
 dataset_path = "./dataset/"
 sft_dataset_path = dataset_path + "sft/"
@@ -30,20 +25,6 @@ keyword_dataset_path = dataset_path + "keyword/"
 
 
 ### Dataset process
-def keyword_loader(dataset_path):
-
-    kaomoji = load_dataset(
-        path="kareudon/kaomoji-tagged",
-        cache_dir=dataset_path,
-        split="train",
-    )
-    emotion = load_dataset(path=dataset_path + "emotion/", split="train")
-
-    keyword = {"kaomoji": kaomoji.to_dict, "emotion_word": emotion.to_dict}
-
-    return keyword
-
-
 def make_RL_conversation(dataset, tokenizer):
 
     system_prompt = r"\
@@ -182,176 +163,6 @@ def reward_func(completions, answer, **kwargs):
     return rewards
 
 
-### Main process
-def import_model(model_path, mem_usage, load_to_vllm):
-
-    qwen_template = """
-{%- for message in messages -%}
-    {%- if message['role'] == 'system' -%}
-        {{- '<|im_start|>system\n' + message['content'] + '<|im_end|>\n' -}}
-    {%- elif message['role'] == 'user' -%}
-        {{- '<|im_start|>user\n' + message['content'] + '<|im_end|>\n' -}}
-    {%- elif message['role'] == 'assistant' -%}
-        {{- '<|im_start|>assistant\n' + message['content'] + '<|im_end|>\n' -}}
-    {%- endif -%}
-{%- endfor -%}
-{%- if add_generation_prompt -%}
-    {{- '<|im_start|>assistant\n<think>\n' -}}
-{%- endif -%}
-"""
-
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=model_path,
-        max_seq_length=max_RL_context,
-        dtype=None,
-        load_in_4bit=False,
-        load_in_8bit=True,
-        use_gradient_checkpointing="unsloth",
-        gpu_memory_utilization=mem_usage,
-        fast_inference=load_to_vllm,
-    )
-
-    tokenizer.chat_template = qwen_template.strip()
-
-    return model, tokenizer
-
-
-def create_lora(model, rank):
-
-    lora = FastLanguageModel.get_peft_model(
-        model=model,
-        r=rank,
-        lora_alpha=2 * rank,
-        lora_dropout=0.0,
-        bias="none",
-        use_gradient_checkpointing="unsloth",
-        ### Train language model
-        target_modules=[
-            "q_proj",
-            "k_proj",
-            "v_proj",
-            "o_proj",
-            "gate_proj",
-            "up_proj",
-            "down_proj",
-        ],
-    )
-
-    return lora
-
-
-def load_data(tokenizer, load_from_cache=False):
-
-    rl = []
-    sft = []
-    keyword = []
-
-    ### Load raw Dataset
-    rl = load_dataset(
-        path="ecnu-icalk/cmm-math", cache_dir=rl_dataset_path, split="train"
-    )
-    sft = load_dataset(path=sft_dataset_path, split="train")
-    # keyword = keyword_loader(keyword_dataset_path)
-
-    ### Remap RL dataset
-    rl_dataset_col_name = rl.column_names
-    rl = rl.map(
-        make_RL_conversation,
-        fn_kwargs={"tokenizer": tokenizer},
-        load_from_cache_file=load_from_cache,
-        remove_columns=rl_dataset_col_name,
-    )
-
-    ### Remap SFT dataset
-    sft_dataset_col_name = sft.column_names
-    sft = sft.map(
-        make_SFT_conversation,
-        fn_kwargs={"tokenizer": tokenizer},
-        load_from_cache_file=load_from_cache,
-        remove_columns=sft_dataset_col_name,
-    )
-
-    return rl, sft, keyword
-
-
-def SFTtrain(lora, tokenizer, dataset, steps, lr, regularization, batch):
-
-    train_args = SFTConfig(
-        per_device_train_batch_size=2,
-        gradient_accumulation_steps=int(batch / 2),
-        warmup_steps=1,
-        max_steps=steps,
-        learning_rate=lr,
-        fp16=not is_bfloat16_supported(),
-        bf16=is_bfloat16_supported(),
-        logging_steps=1,
-        optim="paged_adamw_8bit",
-        weight_decay=regularization,
-        lr_scheduler_type="cosine",
-        max_length=max_SFT_context,
-        max_grad_norm=1.0,
-    )
-
-    trainer = SFTTrainer(
-        model=lora,
-        tokenizer=tokenizer,
-        train_dataset=dataset,
-        dataset_text_field="text",
-        max_seq_length=max_SFT_context,
-        packing=False,
-        args=train_args,
-    )
-
-    trainer.train()
-
-    return lora
-
-
-def GRPOtrain(lora, tokenizer, dataset, lr, steps, regularization, batch):
-
-    generation_steps = 4 if batch < 4 else batch
-
-    train_args = GRPOConfig(
-        per_device_train_batch_size=2,
-        num_generations=2,
-        gradient_accumulation_steps=int(generation_steps / 2),
-        steps_per_generation=int(generation_steps / 2),
-        learning_rate=lr,
-        lr_scheduler_type="cosine",
-        max_steps=steps,
-        warmup_steps=1,
-        optim="paged_adamw_8bit",
-        weight_decay=regularization,
-        logging_steps=1,
-        max_completion_length=max_RL_context,
-        temperature=1.0,
-        top_p=0.95,
-        loss_type="dr_grpo",
-        save_strategy="steps",
-        save_steps=10,
-        save_total_limit=3,
-        output_dir=lora_path,
-    )
-
-    trainer = GRPOTrainer(
-        args=train_args,
-        train_dataset=dataset,
-        reward_funcs=reward_func,
-        model=lora,
-        reward_processing_classes=tokenizer,
-    )
-
-    trainer.train()
-
-    return lora
-
-
-def save_lora(lora, tokenizer):
-
-    lora.save_pretrained(lora_path)
-    tokenizer.save_pretrained(lora_path)
-
-
 ### Main function
 if __name__ == "__main__":
 
@@ -361,11 +172,15 @@ if __name__ == "__main__":
 
     if args.mode == "sft":
 
-        lora, tokenizer = import_model(lora_path, 0.95, False)
+        model, tokenizer = um.import_model(model_path, 0.95, False)
 
-        rl_dataset, sft_dataset, keyword = load_data(tokenizer, load_from_cache=True)
+        lora = um.create_lora(model, 16)
 
-        SFTtrain(
+        sft_dataset = um.load_data(
+            sft_dataset_path, tokenizer, True, sft_dataset_path, make_SFT_conversation
+        )
+
+        um.SFTtrain(
             lora=lora,
             tokenizer=tokenizer,
             dataset=sft_dataset,
@@ -373,17 +188,20 @@ if __name__ == "__main__":
             lr=5e-4,
             regularization=1e-2,
             batch=8,
+            max_SFT_context=max_SFT_context,
         )
-        save_lora(lora, tokenizer)
+        um.save_lora(lora, tokenizer, lora_path)
 
     elif args.mode == "rl":
 
-        model, tokenizer = import_model(model_path, 0.5, True)
+        model, tokenizer = um.import_model(model_path, 0.5, True)
 
-        lora = create_lora(model, 8)
-        rl_dataset, sft_dataset, keyword = load_data(tokenizer, load_from_cache=True)
+        lora = um.create_lora(model, 8)
+        rl_dataset = um.load_data(
+            rl_dataset_path, tokenizer, True, rl_dataset_path, make_RL_conversation
+        )
 
-        GRPOtrain(
+        um.GRPOtrain(
             lora=lora,
             tokenizer=tokenizer,
             dataset=rl_dataset,
@@ -392,5 +210,5 @@ if __name__ == "__main__":
             lr=1e-4,
             batch=4,
         )
-        save_lora(lora, tokenizer)
+        um.save_lora(lora, tokenizer, lora_path)
         torch.distributed.destroy_process_group()
