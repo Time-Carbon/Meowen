@@ -2,13 +2,14 @@ from trl import SFTTrainer, SFTConfig
 from unsloth import is_bfloat16_supported
 
 
-def SFTtrain(lora, tokenizer, dataset, steps, lr, regularization, batch, max_SFT_context):
+def SFTtrain(
+    lora, tokenizer, dataset, lr, regularization, batch, max_SFT_context, **kwarg
+):
 
     train_args = SFTConfig(
         per_device_train_batch_size=2,
         gradient_accumulation_steps=int(batch / 2),
-        warmup_steps=1,
-        max_steps=steps,
+        warmup_ratio=0.05,
         learning_rate=lr,
         fp16=not is_bfloat16_supported(),
         bf16=is_bfloat16_supported(),
@@ -18,12 +19,18 @@ def SFTtrain(lora, tokenizer, dataset, steps, lr, regularization, batch, max_SFT
         lr_scheduler_type="cosine",
         max_length=max_SFT_context,
         max_grad_norm=1.0,
+        per_device_eval_batch_size=2,
+        eval_accumulation_steps=int(batch / 2),
+        eval_strategy="steps",
+        eval_steps=4,
+        **kwarg,
     )
 
     trainer = SFTTrainer(
         model=lora,
         tokenizer=tokenizer,
-        train_dataset=dataset,
+        train_dataset=dataset["train"],
+        eval_dataset=dataset["test"],
         dataset_text_field="text",
         max_seq_length=max_SFT_context,
         packing=False,

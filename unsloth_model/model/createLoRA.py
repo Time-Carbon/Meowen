@@ -1,5 +1,6 @@
 from unsloth import FastLanguageModel
 
+
 def create_lora(model, rank):
 
     lora = FastLanguageModel.get_peft_model(
@@ -10,15 +11,10 @@ def create_lora(model, rank):
         bias="none",
         use_gradient_checkpointing="unsloth",
         ### Train language model
-        target_modules=[
-            "q_proj",
-            "k_proj",
-            "v_proj",
-            "o_proj",
-            "gate_proj",
-            "up_proj",
-            "down_proj",
-        ],
+        finetune_vision_layers=False,
+        finetune_language_layers=True,
+        finetune_attention_modules=True,
+        finetune_mlp_modules=True,
     )
 
     return lora
