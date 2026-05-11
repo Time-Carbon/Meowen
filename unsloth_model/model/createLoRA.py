@@ -10,11 +10,22 @@ def create_lora(model, rank):
         lora_dropout=0.0,
         bias="none",
         use_gradient_checkpointing="unsloth",
-        ### Train language model
-        finetune_vision_layers=False,
-        finetune_language_layers=True,
-        finetune_attention_modules=True,
-        finetune_mlp_modules=True,
+        target_modules=[
+            "embed_tokens",
+            "in_proj_qkv",
+            "in_proj_z",
+            "in_proj_a",
+            "in_proj_b",
+            "out_proj",
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_proj",
+            "up_proj",
+            "down_proj",
+            "lm_head"
+        ],
     )
 
     return lora

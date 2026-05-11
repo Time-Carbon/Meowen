@@ -1,7 +1,7 @@
 from unsloth import FastLanguageModel
 
 
-def import_model(model_path, mem_usage, load_to_vllm = False, max_RL_context = 4096):
+def import_model(model_path, mem_usage, load_to_vllm=False, max_RL_context=4096):
 
     qwen_template = """
 {%- for message in messages -%}

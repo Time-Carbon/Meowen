@@ -6,5 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "flash-linear-attention[conv1d]>=0.5.0",
+    "modelscope>=1.36.3",
+    "openpyxl>=3.1.5",
     "unsloth[cu128-torch2100]>=2026.5.2",
 ]
