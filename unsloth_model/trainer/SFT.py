@@ -1,5 +1,5 @@
 from trl import SFTTrainer, SFTConfig
-from unsloth import is_bfloat16_supported
+from unsloth import is_bfloat16_supported, unsloth_train
 from transformers import EarlyStoppingCallback
 
 
@@ -17,15 +17,15 @@ def SFTtrain(
         weight_decay=regularization,
         lr_scheduler_type="cosine",
         max_length=max_SFT_context,
-        per_device_eval_batch_size=1,
-        eval_accumulation_steps=2,
+        per_device_eval_batch_size=4,
+        eval_accumulation_steps=8,
         eval_strategy="steps",
         eval_steps=100,
         gradient_checkpointing=True,
-        torch_empty_cache_steps=1,
+        torch_empty_cache_steps=4,
         save_strategy="steps",
         save_steps=100,
-        save_total_limit=3,
+        save_total_limit=6,
         output_dir=output_dir,
         greater_is_better=False,
         load_best_model_at_end=True,
@@ -50,6 +50,6 @@ def SFTtrain(
 
     trainer.add_callback(early_stop)
 
-    trainer.train()
+    unsloth_train(trainer)
 
     return lora

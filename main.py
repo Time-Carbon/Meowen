@@ -6,11 +6,10 @@ os.environ["UNSLOTH_USE_MODELSCOPE"] = "1"
 
 ### Global data
 max_SFT_context = 1
-model_path = "./qwen_model/qwen3.5/0.8B_base_8bit/"
+model_path = "./model/"
 lora_path = "./lora/"
-dataset_path = "./dataset/"
-sft_dataset_path = dataset_path + "raw_text/"
-cache_dir = dataset_path + "cache/"
+sft_dataset_path = "./dataset/"
+cache_dir = "cache/"
 
 
 ### Dataset process
@@ -49,11 +48,11 @@ if __name__ == "__main__":
         tokenizer=tokenizer,
         dataset=sft_dataset,
         lr=1e-4,
-        regularization=1e-5,
+        regularization=1e-6,
         max_SFT_context=max_SFT_context,
         num_train_epochs=2,
-        per_device_train_batch_size=2,
-        gradient_accumulation_steps=8,
+        per_device_train_batch_size=4,
+        gradient_accumulation_steps=16,
         max_grad_norm=8,
         output_dir="./lora_cache"
     )
