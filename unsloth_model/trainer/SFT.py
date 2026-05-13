@@ -50,6 +50,6 @@ def SFTtrain(
 
     trainer.add_callback(early_stop)
 
-    unsloth_train(trainer)
+    trainer.train(resume_from_checkpoint=True)
 
     return lora
