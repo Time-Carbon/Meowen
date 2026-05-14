@@ -11,6 +11,7 @@ def create_lora(model, rank):
         bias="none",
         use_gradient_checkpointing="unsloth",
         target_modules=[
+            "embed_tokens",
             "in_proj_qkv",
             "in_proj_z",
             "in_proj_a",

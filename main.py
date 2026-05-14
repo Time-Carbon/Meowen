@@ -41,7 +41,7 @@ if __name__ == "__main__":
         mapper_func=make_SFT_conversation,
     )
 
-    sft_dataset = sft_dataset.train_test_split(test_size=0.1,shuffle=True)
+    sft_dataset = sft_dataset.train_test_split(test_size=0.1,shuffle=False)
 
     um.SFTtrain(
         lora=lora,
