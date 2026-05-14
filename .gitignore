@@ -12,3 +12,4 @@ lora_to_gguf.py
 hf_to_gguf.py
 __pycache__
 trainer_output
+model/*
