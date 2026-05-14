@@ -4,7 +4,15 @@ from transformers import EarlyStoppingCallback
 
 
 def SFTtrain(
-    lora, tokenizer, dataset, lr, regularization, max_SFT_context, output_dir, **kwarg
+    lora,
+    tokenizer,
+    dataset,
+    lr,
+    regularization,
+    max_SFT_context,
+    output_dir,
+    resume,
+    **kwarg,
 ):
 
     train_args = SFTConfig(
@@ -18,9 +26,11 @@ def SFTtrain(
         lr_scheduler_type="reduce_lr_on_plateau",
         lr_scheduler_kwargs={
             "mode": "min",
-            "monitor": "val_loss",
             "factor": 0.5,
             "patience": 2,
+            "threshold": 0.01,
+            "threshold_mode":"abs",
+            "min_lr":1e-8
         },
         max_length=max_SFT_context,
         per_device_eval_batch_size=4,
@@ -56,6 +66,6 @@ def SFTtrain(
 
     trainer.add_callback(early_stop)
 
-    trainer.train(resume_from_checkpoint=True)
+    trainer.train(resume_from_checkpoint=resume)
 
     return lora
