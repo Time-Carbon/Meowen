@@ -51,7 +51,7 @@ if __name__ == "__main__":
         regularization=1e-6,
         max_SFT_context=max_SFT_context,
         num_train_epochs=2,
-        per_device_train_batch_size=4,
+        per_device_train_batch_size=5,
         gradient_accumulation_steps=16,
         max_grad_norm=8,
         output_dir="./lora_cache"
