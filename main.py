@@ -54,7 +54,7 @@ if __name__ == "__main__":
         lr=1e-4,
         regularization=1e-6,
         max_SFT_context=max_SFT_context,
-        num_train_epochs=2,
+        num_train_epochs=5,
         per_device_train_batch_size=4,
         gradient_accumulation_steps=8,
         max_grad_norm=8,
