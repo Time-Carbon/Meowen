@@ -27,7 +27,7 @@ def SFTtrain(
         lr_scheduler_kwargs={
             "mode": "min",
             "factor": 0.5,
-            "patience": 2,
+            "patience": 5,
             "threshold": 0.01,
             "threshold_mode":"abs",
             "min_lr":1e-8
@@ -41,7 +41,7 @@ def SFTtrain(
         torch_empty_cache_steps=4,
         save_strategy="steps",
         save_steps=100,
-        save_total_limit=6,
+        save_total_limit=20,
         output_dir=output_dir,
         greater_is_better=False,
         load_best_model_at_end=True,
@@ -61,7 +61,7 @@ def SFTtrain(
     )
 
     early_stop = EarlyStoppingCallback(
-        early_stopping_patience=3, early_stopping_threshold=0.01
+        early_stopping_patience=10, early_stopping_threshold=0.01
     )
 
     trainer.add_callback(early_stop)
