@@ -46,6 +46,8 @@ if __name__ == "__main__":
 
     um.SFTtrain(
         resume=False,
+        threshold=1e-3,
+        patience=3,
         lora=lora,
         tokenizer=tokenizer,
         dataset=sft_dataset,
