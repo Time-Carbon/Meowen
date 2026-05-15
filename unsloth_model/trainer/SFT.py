@@ -1,5 +1,5 @@
 from trl import SFTTrainer, SFTConfig
-from unsloth import is_bfloat16_supported, unsloth_train
+from unsloth import is_bfloat16_supported
 from transformers import EarlyStoppingCallback
 
 
