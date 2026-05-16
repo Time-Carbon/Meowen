@@ -56,7 +56,7 @@ if __name__ == "__main__":
         max_SFT_context=max_SFT_context,
         num_train_epochs=5,
         per_device_train_batch_size=4,
-        gradient_accumulation_steps=8,
+        gradient_accumulation_steps=4,
         max_grad_norm=8,
         output_dir=lora_cache_path,
     )
