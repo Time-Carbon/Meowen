@@ -18,7 +18,6 @@ def SFTtrain(
 ):
 
     train_args = SFTConfig(
-        warmup_ratio=0.05,
         learning_rate=lr,
         fp16=not is_bfloat16_supported(),
         bf16=is_bfloat16_supported(),
@@ -35,12 +34,10 @@ def SFTtrain(
             "min_lr": 1e-8,
         },
         max_length=max_SFT_context,
-        per_device_eval_batch_size=4,
-        eval_accumulation_steps=8,
         eval_strategy="steps",
         eval_steps=100,
         gradient_checkpointing=True,
-        torch_empty_cache_steps=4,
+        torch_empty_cache_steps=1,
         save_strategy="steps",
         save_steps=100,
         save_total_limit=int(8 * patience),

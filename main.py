@@ -2,6 +2,7 @@ import unsloth_model as um
 import os
 
 os.environ["UNSLOTH_USE_MODELSCOPE"] = "1"
+os.environ["CUDA_MANAGED_FORCE_DEVICE_ALLOC"] = "0"
 
 
 ### Global data
@@ -51,12 +52,14 @@ if __name__ == "__main__":
         lora=lora,
         tokenizer=tokenizer,
         dataset=sft_dataset,
-        lr=1e-4,
-        regularization=1e-6,
+        lr=4e-4,
+        regularization=1e-3,
         max_SFT_context=max_SFT_context,
         num_train_epochs=5,
         per_device_train_batch_size=4,
-        gradient_accumulation_steps=4,
+        gradient_accumulation_steps=8,
+        per_device_eval_batch_size=4,
+        eval_accumulation_steps=8,
         max_grad_norm=8,
         output_dir=lora_cache_path,
     )
