@@ -44,20 +44,20 @@ if __name__ == "__main__":
     sft_dataset = sft_dataset.train_test_split(test_size=0.1, shuffle=False)
 
     um.SFTtrain(
-        resume=True,
+        resume=False,
         threshold=1e-3,
         patience=3,
         lora=lora,
         tokenizer=tokenizer,
         dataset=sft_dataset,
-        lr=2e-4,
-        regularization=1e-3,
+        lr=5e-5,
+        regularization=1e-4,
         max_SFT_context=max_SFT_context,
         num_train_epochs=5,
-        per_device_train_batch_size=4,
-        gradient_accumulation_steps=8,
-        per_device_eval_batch_size=4,
-        eval_accumulation_steps=8,
+        per_device_train_batch_size=8,
+        gradient_accumulation_steps=4,
+        per_device_eval_batch_size=8,
+        eval_accumulation_steps=4,
         max_grad_norm=1,
         output_dir=lora_cache_path,
     )
