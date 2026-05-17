@@ -10,3 +10,6 @@ dependencies = [
     "openpyxl>=3.1.5",
     "unsloth[cu128-torch2100]>=2026.5.2",
 ]
+
+[[tool.uv.index]]
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
