@@ -37,7 +37,6 @@ def SFTtrain(
         eval_strategy="steps",
         eval_steps=100,
         gradient_checkpointing=True,
-        torch_empty_cache_steps=1,
         save_strategy="steps",
         save_steps=100,
         save_total_limit=int(8 * patience),
