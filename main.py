@@ -44,7 +44,7 @@ if __name__ == "__main__":
     sft_dataset = sft_dataset.train_test_split(test_size=0.1, shuffle=False)
 
     um.SFTtrain(
-        resume=False,
+        resume=True,
         threshold=1e-3,
         patience=3,
         lora=lora,
