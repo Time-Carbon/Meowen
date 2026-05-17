@@ -54,11 +54,11 @@ if __name__ == "__main__":
         regularization=1e-3,
         max_SFT_context=max_SFT_context,
         num_train_epochs=5,
-        per_device_train_batch_size=6,
+        per_device_train_batch_size=4,
         gradient_accumulation_steps=8,
-        per_device_eval_batch_size=6,
+        per_device_eval_batch_size=4,
         eval_accumulation_steps=8,
-        max_grad_norm=8,
+        max_grad_norm=1,
         output_dir=lora_cache_path,
     )
     um.save_lora(lora, tokenizer, lora_path)
