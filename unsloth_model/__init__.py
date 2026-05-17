@@ -1,7 +1,7 @@
 import os
 
 os.environ["CUDA_MANAGED_FORCE_DEVICE_ALLOC"] = "1"
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
 import unsloth
 import torch
