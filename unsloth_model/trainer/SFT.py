@@ -34,7 +34,7 @@ def SFTtrain(
         gradient_checkpointing=True,
         save_strategy="steps",
         save_steps=100,
-        save_total_limit=int(8 * patience),
+        save_total_limit=int(2 * patience),
         output_dir=output_dir,
         greater_is_better=False,
         load_best_model_at_end=True,
@@ -54,7 +54,7 @@ def SFTtrain(
     )
 
     early_stop = EarlyStoppingCallback(
-        early_stopping_patience=int(4 * patience), early_stopping_threshold=threshold
+        early_stopping_patience=patience, early_stopping_threshold=threshold
     )
 
     trainer.add_callback(early_stop)
