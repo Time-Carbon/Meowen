@@ -19,19 +19,14 @@ def SFTtrain(
 
     train_args = SFTConfig(
         learning_rate=lr,
-        fp16=not is_bfloat16_supported(),
+        warmup_steps=0.05,
         bf16=is_bfloat16_supported(),
         logging_steps=1,
         optim="paged_adamw_8bit",
         weight_decay=regularization,
-        lr_scheduler_type="reduce_lr_on_plateau",
+        lr_scheduler_type="cosine_warmup_with_min_lr",
         lr_scheduler_kwargs={
-            "mode": "min",
-            "factor": 0.5,
-            "patience": patience,
-            "threshold": threshold,
-            "threshold_mode": "abs",
-            "min_lr": 1e-8,
+            "min_lr": 0.01 * lr,
         },
         max_length=max_SFT_context,
         eval_strategy="steps",
@@ -39,7 +34,7 @@ def SFTtrain(
         gradient_checkpointing=True,
         save_strategy="steps",
         save_steps=100,
-        save_total_limit=int(8 * patience),
+        save_total_limit=int(2 * patience),
         output_dir=output_dir,
         greater_is_better=False,
         load_best_model_at_end=True,
@@ -59,7 +54,7 @@ def SFTtrain(
     )
 
     early_stop = EarlyStoppingCallback(
-        early_stopping_patience=int(4 * patience), early_stopping_threshold=threshold
+        early_stopping_patience=patience, early_stopping_threshold=threshold
     )
 
     trainer.add_callback(early_stop)
