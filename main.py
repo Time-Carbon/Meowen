@@ -31,7 +31,7 @@ if __name__ == "__main__":
 
     model, tokenizer = um.import_model(model_path, 0.95, False)
 
-    lora = um.create_lora(model, 12)
+    lora = um.create_lora(model, 4)
 
     sft_dataset = um.load_data(
         path=sft_dataset_path,
@@ -46,11 +46,11 @@ if __name__ == "__main__":
     um.SFTtrain(
         resume=False,
         threshold=1e-3,
-        patience=10,
+        patience=4,
         lora=lora,
         tokenizer=tokenizer,
         dataset=sft_dataset,
-        lr=5e-5,
+        lr=8e-5,
         regularization=1e-4,
         max_SFT_context=max_SFT_context,
         num_train_epochs=5,
