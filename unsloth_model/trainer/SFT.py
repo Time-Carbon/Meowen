@@ -14,6 +14,7 @@ def SFTtrain(
     resume,
     threshold,
     patience,
+    eval_steps,
     **kwarg,
 ):
 
@@ -30,10 +31,10 @@ def SFTtrain(
         },
         max_length=max_SFT_context,
         eval_strategy="steps",
-        eval_steps=100,
+        eval_steps=eval_steps,
         gradient_checkpointing=True,
         save_strategy="steps",
-        save_steps=100,
+        save_steps=eval_steps,
         save_total_limit=int(2 * patience),
         output_dir=output_dir,
         greater_is_better=False,
