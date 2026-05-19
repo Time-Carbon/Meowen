@@ -31,7 +31,7 @@ if __name__ == "__main__":
 
     model, tokenizer = um.import_model(model_path, 0.95, False)
 
-    lora = um.create_lora(model, 64)
+    lora = um.create_lora(model, 12)
 
     sft_dataset = um.load_data(
         path=sft_dataset_path,
