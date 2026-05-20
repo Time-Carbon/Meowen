@@ -51,7 +51,7 @@ if __name__ == "__main__":
         tokenizer=tokenizer,
         dataset=sft_dataset,
         lr=5e-5,
-        regularization=1e-4,
+        regularization=1e-3,
         max_SFT_context=max_SFT_context,
         num_train_epochs=2,
         eval_steps=200,
