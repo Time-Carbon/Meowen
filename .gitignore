@@ -14,3 +14,4 @@ __pycache__
 trainer_output
 model/*
 .env
+c_dataset
