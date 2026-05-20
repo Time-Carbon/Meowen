@@ -31,12 +31,12 @@ if __name__ == "__main__":
 
     model, tokenizer = um.import_model(model_path, 0.95, False)
 
-    lora = um.create_lora(model, 4)
+    lora = um.create_lora(model, 2)
 
     sft_dataset = um.load_data(
         path=sft_dataset_path,
         tokenizer=tokenizer,
-        load_from_cache=True,
+        load_from_cache=False,
         cache_dir=cache_dir,
         mapper_func=make_SFT_conversation,
     )
@@ -55,9 +55,9 @@ if __name__ == "__main__":
         max_SFT_context=max_SFT_context,
         num_train_epochs=5,
         eval_steps=400,
-        per_device_train_batch_size=6,
+        per_device_train_batch_size=4,
         gradient_accumulation_steps=5,
-        per_device_eval_batch_size=6,
+        per_device_eval_batch_size=4,
         eval_accumulation_steps=2,
         max_grad_norm=1,
         output_dir=lora_cache_path,
