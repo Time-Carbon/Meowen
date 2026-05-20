@@ -50,7 +50,7 @@ def SFTtrain(
         eval_dataset=dataset["test"],
         dataset_text_field="text",
         max_seq_length=max_SFT_context,
-        packing=True,
+        packing=False,
         args=train_args,
     )
 
