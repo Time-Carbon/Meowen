@@ -1,17 +1,58 @@
-qwen_model
+# 符号链接指向外部大容量目录
+c_dataset
+dataset
+
+# 模型文件：忽略权重，保留配置和分词器
+model/*
+
+# LoRA 与训练输出
 lora
+lora_cache
+unsloth_training_checkpoints
+
+# 编译缓存与 Unsloth 专用缓存
+unsloth_compiled_cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+unsloth_model/**/__pycache__/
+
+# 数据文件（Parquet、CSV 等）
+*.parquet
+*.csv
+*.jsonl
+
+# 环境与配置
+.env
 .python-version
 .venv
-unsloth_compiled_cache
+venv/
+ENV/
+
+# IDE 与编辑器
+.vscode/
+.idea/
 *.swp
-.vscode
-dataset
-grpo_trainer_lora_model
-unsloth_training_checkpoints
-lora_to_gguf.py
-hf_to_gguf.py
-__pycache__
-trainer_output
-model/*
-.env
-c_dataset
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Python 构建与打包
+dist/
+build/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# 日志与临时文件
+*.log
+*.tmp
+*.bak
+*.orig
