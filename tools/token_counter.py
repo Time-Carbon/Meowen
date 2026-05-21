@@ -50,22 +50,34 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_parquet_texts(parquet_dir: str, text_column: str = "text") -> List[str]:
+def load_parquet_file_list(parquet_dir: str) -> List[str]:
     """
-    加载指定文件夹下所有 Parquet 文件的文本列。
+    加载指定文件夹下所有 Parquet 文件的列表。
 
     参数:
         parquet_dir: Parquet 文件所在文件夹。
-        text_column: 文本列的名称。
 
     返回:
-        所有文本行的列表。
+        所有文件的列表。
     """
     pattern = os.path.join(parquet_dir, "*.parquet")
     file_paths = sorted(glob(pattern))
     if not file_paths:
         raise FileNotFoundError(f"在 {parquet_dir} 中未找到任何 .parquet 文件。")
+    return file_paths
 
+
+def load_parquet_text(file_paths: List[str], text_column: str = "text") -> List[str]:
+    """
+    加载指定文件夹下所有 Parquet 文件的文本列。
+
+    参数:
+        file_paths: Parquet 文件所在文件夹。
+        text_column: 文本列的名称。
+
+    返回:
+        所有文本行的列表。
+    """
     all_texts = []
     for file_path in file_paths:
         df = pd.read_parquet(file_path, columns=[text_column])
@@ -107,11 +119,13 @@ def tokenize_chunk(args: tuple) -> Counter:
     返回:
         本批次的 token 计数器。
     """
-    chunk_texts, tokenizer_dir = args
+    chunk_file_list, tokenizer_dir, text_column = args
     tokenizer = load_tokenizer(tokenizer_dir)
     local_counter = Counter()
 
-    for text in chunk_texts:
+    texts = load_parquet_text(chunk_file_list, text_column)
+
+    for text in texts:
         # 仅获取 token 字符串，不映射为 ID
         tokens = tokenizer.tokenize(text)
         local_counter.update(tokens)
@@ -143,7 +157,7 @@ def save_counter_to_json(
     readable_result = []
     for token, count in counter.items():
         readable_text = tokenizer.convert_tokens_to_string([token])
-        readable_text = readable_text.encode('utf-8', errors='replace').decode('utf-8')
+        readable_text = readable_text.encode("utf-8", errors="replace").decode("utf-8")
         readable_result.append({"token": token, "text": readable_text, "count": count})
 
     # 按 token 排序（或按频次降序）
@@ -159,22 +173,22 @@ def main() -> None:
 
     # 1. 加载所有文本
     print("加载 Parquet 文本...")
-    texts = load_parquet_texts(args.parquet_dir, args.text_column)
-    print(f"共加载 {len(texts)} 条文本。")
+    file_list = load_parquet_file_list(args.parquet_dir)
+    print(f"共加载 {len(file_list)} 个文件。")
 
     # 2. 确定并行进程数
     num_workers = args.num_workers or cpu_count()
     print(f"使用 {num_workers} 个进程进行分词。")
 
     # 3. 将文本划分为多个 chunk，每个进程处理一个 chunk
-    chunk_size = max(1, len(texts) // num_workers)
+    chunk_size = max(1, len(file_list) // num_workers)
     chunks = []
-    for i in range(0, len(texts), chunk_size):
-        chunks.append(texts[i : i + chunk_size])
+    for i in range(0, len(file_list), chunk_size):
+        chunks.append(file_list[i : i + chunk_size])
 
     # 4. 多进程分词与局部统计
     # 将 tokenizer 路径传递给每个子进程，避免序列化 tokenizer 对象
-    task_args = [(chunk, args.tokenizer_dir) for chunk in chunks]
+    task_args = [(chunk, args.tokenizer_dir, args.text_column) for chunk in chunks]
 
     with Pool(processes=num_workers) as pool:
         partial_counters = pool.map(tokenize_chunk, task_args)
