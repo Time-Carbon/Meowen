@@ -41,7 +41,7 @@ def save_chunk_as_parquet(text: list, output_path: str) -> None:
         output_path: 输出文件路径（应包含 .parquet 后缀）。
     """
     df = pd.DataFrame({"text": text})
-    df.to_parquet(output_path, index=False, engine="pyarrow")
+    df.to_parquet(output_path, index=False, engine="pyarrow", compression="gzip")
 
 
 def stream_split_and_save(
