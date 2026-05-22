@@ -10,19 +10,26 @@ def create_lora(model, rank):
         lora_dropout=0.0,
         bias="none",
         use_gradient_checkpointing="unsloth",
+        ensure_weight_tying=True,
         target_modules=[
+            ### Attention
             "in_proj_qkv",
             "in_proj_z",
             "in_proj_a",
             "in_proj_b",
             "out_proj",
+            ### The last attention layer of Qwen3.5
             "q_proj",
             "k_proj",
             "v_proj",
             "o_proj",
+            ### MLP
             "gate_proj",
             "up_proj",
             "down_proj",
+            ### Embedding and output
+            "embed_tokens",
+            "lm_head",
         ],
     )
 
