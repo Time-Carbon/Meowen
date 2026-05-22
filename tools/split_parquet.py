@@ -85,7 +85,7 @@ def save_shards(
     for idx, shard in enumerate(shards, start=1):
         filename = f"{prefix}_{idx:04d}.parquet"
         filepath = os.path.join(output_dir, filename)
-        shard.to_parquet(filepath, index=False)
+        shard.to_parquet(filepath, index=False, compression="gzip")
         print(f"已保存: {filepath} (行数: {len(shard)})")
 
 
