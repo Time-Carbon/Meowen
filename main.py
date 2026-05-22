@@ -53,7 +53,7 @@ if __name__ == "__main__":
         lora=lora,
         tokenizer=tokenizer,
         dataset=sft_dataset,
-        lr=2e-4,
+        lr=1e-4,
         regularization=1e-3,
         max_SFT_context=max_SFT_context,
         num_train_epochs=2,
