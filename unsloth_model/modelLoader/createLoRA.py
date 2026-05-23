@@ -10,7 +10,6 @@ def create_lora(model, rank):
         lora_dropout=0.0,
         bias="none",
         use_gradient_checkpointing="unsloth",
-        ensure_weight_tying=True,
         target_modules=[
             ### Attention
             "in_proj_qkv",
@@ -27,9 +26,6 @@ def create_lora(model, rank):
             "gate_proj",
             "up_proj",
             "down_proj",
-            ### Embedding and output
-            "embed_tokens",
-            "lm_head",
         ],
     )
 

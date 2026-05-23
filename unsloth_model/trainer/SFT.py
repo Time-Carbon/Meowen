@@ -1,6 +1,5 @@
-from trl import SFTConfig
+from trl import SFTConfig, SFTTrainer
 from unsloth import is_bfloat16_supported
-from unsloth import UnslothTrainer, UnslothTrainingArguments
 from transformers import EarlyStoppingCallback
 
 
@@ -19,7 +18,7 @@ def SFTtrain(
     **kwarg,
 ):
 
-    train_args = UnslothTrainingArguments(
+    train_args = SFTConfig(
         learning_rate=lr,
         warmup_steps=0.05,
         bf16=is_bfloat16_supported(),
@@ -41,11 +40,10 @@ def SFTtrain(
         greater_is_better=False,
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
-        embedding_learning_rate=0.1 * lr,
         **kwarg,
     )
 
-    trainer = UnslothTrainer(
+    trainer = SFTTrainer(
         model=lora,
         tokenizer=tokenizer,
         train_dataset=dataset["train"],
