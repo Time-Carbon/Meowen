@@ -31,7 +31,7 @@ if __name__ == "__main__":
 
     model, tokenizer = um.import_model(model_path, 0.95, False)
 
-    if tokenizer.pad_token == None and tokenizer.pad_token_id == None:
+    if tokenizer.pad_token == "<|PAD_TOKEN|>":
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
