@@ -30,9 +30,10 @@ def make_SFT_conversation(dataset, tokenizer):
 if __name__ == "__main__":
 
     model, tokenizer = um.import_model(model_path, 0.95, False)
-    tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.pad_token_id = tokenizer.eos_token_id
 
+    if tokenizer.pad_token == None and tokenizer.pad_token_id == None:
+        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.pad_token_id = tokenizer.eos_token_id
 
     lora = um.create_lora(model, 4)
 
