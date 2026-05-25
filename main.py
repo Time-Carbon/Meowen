@@ -35,7 +35,7 @@ if __name__ == "__main__":
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
-    lora = um.create_lora(model, 4)
+    lora = um.create_lora(model, 64)
 
     sft_dataset = um.load_data(
         path=sft_dataset_path,
@@ -49,8 +49,8 @@ if __name__ == "__main__":
 
     um.SFTtrain(
         resume=False,
-        threshold=5e-4,
-        patience=4,
+        threshold=1e-3,
+        patience=3,
         lora=lora,
         tokenizer=tokenizer,
         dataset=sft_dataset,
