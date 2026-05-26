@@ -151,7 +151,8 @@ def generate_conversation(
         {"role": "user", "content": opener}
     ]
     messages_b = [
-        {"role": "system", "content": prompt_b}
+        {"role": "system", "content": prompt_b},
+        {"role": "assistant", "content": opener}
     ]
 
     # This will hold the final output (without prompts and opener)
