@@ -5,11 +5,6 @@ os.environ["UNSLOTH_USE_MODELSCOPE"] = "1"
 
 ### Global data
 max_SFT_context = 1
-model_path = "./model/"
-lora_path = "./lora/"
-sft_dataset_path = "./dataset/"
-cache_dir = "./cache/"
-lora_cache_path = "./lora_cache/"
 
 
 ### Dataset process
@@ -26,44 +21,97 @@ def make_SFT_conversation(dataset, tokenizer):
     return {"text": prompt}
 
 
+### Get args
+import argparse
+
+
+def get_args():
+    parser = argparse.ArgumentParser(description="SFT LoRA training script")
+
+    # 路径参数
+    parser.add_argument("--model_path", type=str, required=True, help="预训练模型路径")
+    parser.add_argument(
+        "--sft_dataset_path", type=str, required=True, help="SFT 数据集路径"
+    )
+    parser.add_argument(
+        "--cache_dir", type=str, default="./cache", help="数据集缓存目录"
+    )
+    parser.add_argument(
+        "--lora_cache_path",
+        type=str,
+        default="./lora_cache",
+        help="训练中间 checkpoint 输出目录",
+    )
+    parser.add_argument(
+        "--lora_path", type=str, default="./lora_model", help="最终保存 LoRA 权重的路径"
+    )
+
+    # 训练超参数（题目要求重点提取的 lora_rank, epoch, learn_rate）
+    parser.add_argument("--lora_rank", type=int, default=4, help="LoRA 秩 (rank)")
+    parser.add_argument(
+        "--num_train_epochs", type=int, default=1, help="训练轮数 (epoch)"
+    )
+    parser.add_argument("--lr", type=float, default=5e-5, help="学习率 (learning rate)")
+
+    # 其他常用训练参数
+    parser.add_argument(
+        "--regularization", type=float, default=1e-4, help="权重衰减正则化系数"
+    )
+    parser.add_argument("--per_device_train_batch_size", type=int, default=8)
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
+    parser.add_argument("--per_device_eval_batch_size", type=int, default=4)
+    parser.add_argument("--eval_accumulation_steps", type=int, default=4)
+    parser.add_argument("--max_grad_norm", type=float, default=1.0)
+    parser.add_argument("--eval_steps", type=int, default=400)
+    parser.add_argument("--patience", type=int, default=3, help="早停 patience")
+    parser.add_argument("--threshold", type=float, default=1e-3, help="早停阈值")
+    parser.add_argument(
+        "--resume", action="store_true", help="是否从 checkpoint 恢复训练"
+    )
+    parser.add_argument("--test_size", type=float, default=0.1, help="验证集划分比例")
+
+    return parser.parse_args()
+
+
 ### Main function
 if __name__ == "__main__":
+    args = get_args()
 
-    model, tokenizer = um.import_model(model_path, 0.95, False)
+    model, tokenizer = um.import_model(args.model_path, 0.95, False)
 
     if tokenizer.pad_token == "<|PAD_TOKEN|>":
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
-    lora = um.create_lora(model, 64)
+    lora = um.create_lora(model, args.lora_rank)
 
     sft_dataset = um.load_data(
-        path=sft_dataset_path,
+        path=args.sft_dataset_path,
         tokenizer=tokenizer,
         load_from_cache=False,
-        cache_dir=cache_dir,
+        cache_dir=args.cache_dir,
         mapper_func=make_SFT_conversation,
     )
 
-    sft_dataset = sft_dataset.train_test_split(test_size=0.1, shuffle=False)
+    sft_dataset = sft_dataset.train_test_split(test_size=args.test_size, shuffle=False)
 
     um.SFTtrain(
-        resume=False,
-        threshold=1e-3,
-        patience=3,
+        resume=args.resume,
+        threshold=args.threshold,
+        patience=args.patience,
         lora=lora,
         tokenizer=tokenizer,
         dataset=sft_dataset,
-        lr=5e-5,
-        regularization=1e-4,
+        lr=args.lr,
+        regularization=args.regularization,
         max_SFT_context=max_SFT_context,
-        num_train_epochs=4,
-        eval_steps=400,
-        per_device_train_batch_size=8,
-        gradient_accumulation_steps=2,
-        per_device_eval_batch_size=4,
-        eval_accumulation_steps=4,
-        max_grad_norm=1,
-        output_dir=lora_cache_path,
+        num_train_epochs=args.num_train_epochs,
+        eval_steps=args.eval_steps,
+        per_device_train_batch_size=args.per_device_train_batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        per_device_eval_batch_size=args.per_device_eval_batch_size,
+        eval_accumulation_steps=args.eval_accumulation_steps,
+        max_grad_norm=args.max_grad_norm,
+        output_dir=args.lora_cache_path,
     )
-    um.save_lora(lora, tokenizer, lora_path)
+    um.save_lora(lora, tokenizer, args.lora_path)
