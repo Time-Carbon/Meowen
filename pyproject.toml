@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "flash-linear-attention[conv1d]>=0.5.0",
     "modelscope>=1.36.3",
+    "openai>=2.38.0",
     "openpyxl>=3.1.5",
     "pyahocorasick>=2.3.1",
     "unsloth[cu128-torch2100]>=2026.5.2",
