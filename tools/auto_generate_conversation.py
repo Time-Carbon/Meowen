@@ -35,6 +35,18 @@ def parse_arguments() -> argparse.Namespace:
         default="https://api.openai.com/v1",
         help="Base URL for API requests (default: OpenAI)"
     )
+    parser.add_argument(
+        "--temperature",
+        default=1.0,
+        type=float,
+        help="Temperature"
+    )
+    parser.add_argument(
+        "--top_p",
+        default=0.95,
+        type=float,
+        help="Top P"
+    )
     parser.add_argument("--model", required=True, help="Model name to use")
     parser.add_argument(
         "--num-sessions", type=int, required=True,
@@ -102,7 +114,9 @@ def chat_completion(
     client: OpenAI,
     model: str,
     messages: List[Dict],
-    max_retries: int = 3
+    max_retries: int = 3,
+    temperature: float = 1.0,
+    top_p: float = 0.95
 ) -> str:
     """Send a chat completion request and return the response text."""
     last_exception = None
@@ -110,7 +124,12 @@ def chat_completion(
         try:
             response = client.chat.completions.create(
                 model=model,
-                messages=messages
+                messages=messages,
+                temperature=temperature,
+                top_p=top_p,
+                extra_body={
+                    "enable_thinking":False
+                }
             )
             return response.choices[0].message.content
         except Exception as e:
@@ -128,7 +147,9 @@ def generate_conversation(
     prompt_a: str,
     prompt_b: str,
     opener: str,
-    turns: int = 10
+    turns: int = 10,
+    top_p: float = 0.95,
+    temperature: float = 1.0
 ) -> List[Dict]:
     """
     Generate a multi-turn conversation using perspective switching.
@@ -160,7 +181,7 @@ def generate_conversation(
 
     for _ in range(turns):
         # Agent A generates a response (it sees itself as assistant)
-        response_a = chat_completion(client, model, messages_a)
+        response_a = chat_completion(client, model, messages_a, temperature=temperature, top_p=top_p)
 
         # Update A's history: its own reply is assistant
         messages_a.append({"role": "assistant", "content": response_a})
@@ -171,7 +192,7 @@ def generate_conversation(
         output_messages.append({"role": "user", "content": response_a})
 
         # Agent B generates a response (it sees itself as assistant)
-        response_b = chat_completion(client, model, messages_b)
+        response_b = chat_completion(client, model, messages_b, temperature=temperature, top_p=top_p)
 
         # Update B's history: its own reply is assistant
         messages_b.append({"role": "assistant", "content": response_b})
@@ -228,7 +249,9 @@ def main() -> None:
                 prompt_a=prompt_a,
                 prompt_b=prompt_b,
                 opener=opener,
-                turns=args.turns
+                turns=args.turns,
+                temperature=args.temperature,
+                top_p=args.top_p
             )
 
             save_conversation(conversation, args.output_dir, session_idx + 1)
