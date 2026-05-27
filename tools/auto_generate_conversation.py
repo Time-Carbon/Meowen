@@ -28,54 +28,46 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--api-key",
         default=os.environ.get("OPENAI_API_KEY"),
-        help="OpenAI API key (or set OPENAI_API_KEY environment variable)"
+        help="OpenAI API key (or set OPENAI_API_KEY environment variable)",
     )
     parser.add_argument(
         "--base-url",
         default="https://api.openai.com/v1",
-        help="Base URL for API requests (default: OpenAI)"
+        help="Base URL for API requests (default: OpenAI)",
     )
-    parser.add_argument(
-        "--temperature",
-        default=1.0,
-        type=float,
-        help="Temperature"
-    )
-    parser.add_argument(
-        "--top_p",
-        default=0.95,
-        type=float,
-        help="Top P"
-    )
+    parser.add_argument("--temperature", default=1.0, type=float, help="Temperature")
+    parser.add_argument("--top_p", default=0.95, type=float, help="Top P")
     parser.add_argument("--model", required=True, help="Model name to use")
     parser.add_argument(
-        "--num-sessions", type=int, required=True,
-        help="Number of independent conversations to generate"
+        "--num-sessions",
+        type=int,
+        required=True,
+        help="Number of independent conversations to generate",
     )
     parser.add_argument(
-        "--prompt-a", required=True,
-        help="Path to system prompt for Agent A (.txt)"
+        "--prompt-a", required=True, help="Path to system prompt for Agent A (.txt)"
     )
     parser.add_argument(
-        "--prompt-b", required=True,
-        help="Path to system prompt for Agent B (.txt)"
+        "--prompt-b", required=True, help="Path to system prompt for Agent B (.txt)"
     )
     parser.add_argument(
-        "--opener", required=True,
-        help="Path to CSV file containing opening lines"
+        "--opener", required=True, help="Path to CSV file containing opening lines"
     )
     parser.add_argument(
-        "--output-dir", required=True,
-        help="Directory to save the generated conversations"
+        "--output-dir",
+        required=True,
+        help="Directory to save the generated conversations",
     )
     parser.add_argument(
-        "--turns", type=int, default=10,
-        help="Number of conversation turns (default: 10)"
+        "--turns",
+        type=int,
+        default=10,
+        help="Number of conversation turns (default: 10)",
     )
     parser.add_argument(
         "--skip-header",
         action="store_true",
-        help="Skip the first row of the CSV file (e.g., a header)"
+        help="Skip the first row of the CSV file (e.g., a header)",
     )
     return parser.parse_args()
 
@@ -116,7 +108,7 @@ def chat_completion(
     messages: List[Dict],
     max_retries: int = 3,
     temperature: float = 1.0,
-    top_p: float = 0.95
+    top_p: float = 0.95,
 ) -> str:
     """Send a chat completion request and return the response text."""
     last_exception = None
@@ -127,18 +119,42 @@ def chat_completion(
                 messages=messages,
                 temperature=temperature,
                 top_p=top_p,
-                extra_body={
-                    "enable_thinking":False
-                }
+                extra_body={"enable_thinking": False},
             )
             return response.choices[0].message.content
         except Exception as e:
             print(
                 f"API call failed (attempt {attempt+1}/{max_retries}): {e}",
-                file=sys.stderr
+                file=sys.stderr,
             )
             last_exception = e
-    raise RuntimeError(f"Chat completion failed after {max_retries} attempts") from last_exception
+    raise RuntimeError(
+        f"Chat completion failed after {max_retries} attempts"
+    ) from last_exception
+
+
+def extract_tag_content(text: str, tag: str) -> str:
+    """提取指定标签内的文本，若结束标签缺失则提取到文本末尾。"""
+    start_tag = f"<{tag}>"
+    end_tag = f"</{tag}>"
+
+    start_idx = text.find(start_tag)
+    if start_idx == -1:
+        return ""
+
+    content_start = start_idx + len(start_tag)
+    end_idx = text.find(end_tag, content_start)
+
+    if end_idx == -1:
+        return text[content_start:]
+    return text[content_start:end_idx]
+
+
+def parse_dialogue_tags(text: str) -> Dict:
+    """解析对话文本，返回 (thinking, responding) 元组。"""
+    thinking = extract_tag_content(text, "reasoning")
+    responding = extract_tag_content(text, "responding")
+    return {"think":thinking, "respond": responding}
 
 
 def generate_conversation(
@@ -149,7 +165,7 @@ def generate_conversation(
     opener: str,
     turns: int = 10,
     top_p: float = 0.95,
-    temperature: float = 1.0
+    temperature: float = 1.0,
 ) -> List[Dict]:
     """
     Generate a multi-turn conversation using perspective switching.
@@ -169,11 +185,11 @@ def generate_conversation(
     # Message histories for each agent, including system prompt and mapped roles
     messages_a = [
         {"role": "system", "content": prompt_a},
-        {"role": "user", "content": opener}
+        {"role": "user", "content": opener},
     ]
     messages_b = [
         {"role": "system", "content": prompt_b},
-        {"role": "assistant", "content": opener}
+        {"role": "assistant", "content": opener},
     ]
 
     # This will hold the final output (without prompts and opener)
@@ -181,34 +197,38 @@ def generate_conversation(
 
     for _ in range(turns):
         # Agent A generates a response (it sees itself as assistant)
-        response_a = chat_completion(client, model, messages_a, temperature=temperature, top_p=top_p)
+        response_a = chat_completion(
+            client, model, messages_a, temperature=temperature, top_p=top_p
+        )
+        response_a_parse = parse_dialogue_tags(response_a)
 
         # Update A's history: its own reply is assistant
         messages_a.append({"role": "assistant", "content": response_a})
         # Update B's history: A's reply is user (input for B)
-        messages_b.append({"role": "user", "content": response_a})
+        messages_b.append({"role": "user", "content": response_a_parse["respond"]})
 
         # Record in output as user (required final format)
-        output_messages.append({"role": "user", "content": response_a})
+        output_messages.append({"role": "user", "content": response_a_parse["respond"], "reasoning": response_a_parse["think"]})
 
         # Agent B generates a response (it sees itself as assistant)
-        response_b = chat_completion(client, model, messages_b, temperature=temperature, top_p=top_p)
+        response_b = chat_completion(
+            client, model, messages_b, temperature=temperature, top_p=top_p
+        )
+        response_b_parse = parse_dialogue_tags(response_b)
 
         # Update B's history: its own reply is assistant
         messages_b.append({"role": "assistant", "content": response_b})
         # Update A's history: B's reply is user (input for A)
-        messages_a.append({"role": "user", "content": response_b})
+        messages_a.append({"role": "user", "content": response_b_parse["respond"]})
 
         # Record in output as assistant
-        output_messages.append({"role": "assistant", "content": response_b})
+        output_messages.append({"role": "assistant", "content": response_b_parse["respond"], "reasoning": response_b_parse["think"]})
 
     return output_messages
 
 
 def save_conversation(
-    conversation: List[Dict],
-    output_dir: str,
-    session_index: int
+    conversation: List[Dict], output_dir: str, session_index: int
 ) -> None:
     """Save a conversation to a JSON file."""
     filename = f"session_{session_index:04d}.json"
@@ -240,7 +260,7 @@ def main() -> None:
             print(
                 f"Generating session {session_idx+1}/{args.num_sessions} "
                 f"with opener: {opener[:50]}...",
-                flush=True
+                flush=True,
             )
 
             conversation = generate_conversation(
@@ -251,7 +271,7 @@ def main() -> None:
                 opener=opener,
                 turns=args.turns,
                 temperature=args.temperature,
-                top_p=args.top_p
+                top_p=args.top_p,
             )
 
             save_conversation(conversation, args.output_dir, session_idx + 1)
