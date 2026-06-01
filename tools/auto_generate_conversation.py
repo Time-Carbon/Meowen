@@ -81,8 +81,8 @@ def load_text_file(filepath: str) -> str:
         raise SystemExit(f"Error loading {filepath}: {e}")
 
 
-def load_openers(filepath: str, skip_header: bool = False) -> List[str]:
-    """Load opening lines from the first column of a CSV file."""
+def load_openers(filepath: str, skip_header: bool = False) -> List[Dict[str, str]]:
+    """Load opening lines from a two‑column CSV (think, respond)."""
     openers = []
     try:
         with open(filepath, "r", encoding="utf-8", newline="") as f:
@@ -93,8 +93,9 @@ def load_openers(filepath: str, skip_header: bool = False) -> List[str]:
                 except StopIteration:
                     raise SystemExit("CSV file is empty (no data after header).")
             for row in reader:
-                if row and row[0].strip():
-                    openers.append(row[0].strip())
+                # 至少需要两列，且两列非空
+                if len(row) >= 2 and row[0].strip() and row[1].strip():
+                    openers.append({"think": row[0].strip(), "respond": row[1].strip()})
     except Exception as e:
         raise SystemExit(f"Error loading openers from {filepath}: {e}")
     if not openers:
@@ -119,6 +120,7 @@ def chat_completion(
                 messages=messages,
                 temperature=temperature,
                 top_p=top_p,
+                frequency_penalty=1.5,
                 extra_body={"enable_thinking": False},
             )
             return response.choices[0].message.content
@@ -154,7 +156,7 @@ def parse_dialogue_tags(text: str) -> Dict:
     """解析对话文本，返回 (thinking, responding) 元组。"""
     thinking = extract_tag_content(text, "reasoning")
     responding = extract_tag_content(text, "responding")
-    return {"think":thinking, "respond": responding}
+    return {"think": thinking, "respond": responding}
 
 
 def generate_conversation(
@@ -162,7 +164,7 @@ def generate_conversation(
     model: str,
     prompt_a: str,
     prompt_b: str,
-    opener: str,
+    opener: Dict,
     turns: int = 10,
     top_p: float = 0.95,
     temperature: float = 1.0,
@@ -185,11 +187,14 @@ def generate_conversation(
     # Message histories for each agent, including system prompt and mapped roles
     messages_a = [
         {"role": "system", "content": prompt_a},
-        {"role": "user", "content": opener},
+        {"role": "user", "content": opener["respond"]},
     ]
     messages_b = [
         {"role": "system", "content": prompt_b},
-        {"role": "assistant", "content": opener},
+        {
+            "role": "assistant",
+            "content": f"<reasoning>\n{opener["think"]}\n</reasoning>\n<responding>\n{opener['respond']}\n</responding>",
+        },
     ]
 
     # This will hold the final output (without prompts and opener)
@@ -200,29 +205,51 @@ def generate_conversation(
         response_a = chat_completion(
             client, model, messages_a, temperature=temperature, top_p=top_p
         )
-        response_a_parse = parse_dialogue_tags(response_a)
+        response_a = parse_dialogue_tags(response_a)
 
         # Update A's history: its own reply is assistant
-        messages_a.append({"role": "assistant", "content": response_a})
+        messages_a.append(
+            {
+                "role": "assistant",
+                "content": f"<reasoning>\n{response_a['think']}\n</reasoning>\n<responding>\n{response_a['respond']}\n</responding>",
+            }
+        )
         # Update B's history: A's reply is user (input for B)
-        messages_b.append({"role": "user", "content": response_a_parse["respond"]})
+        messages_b.append({"role": "user", "content": response_a["respond"]})
 
         # Record in output as user (required final format)
-        output_messages.append({"role": "user", "content": response_a_parse["respond"], "reasoning": response_a_parse["think"]})
+        output_messages.append(
+            {
+                "role": "user",
+                "content": response_a["respond"],
+                "reasoning": response_a["think"],
+            }
+        )
 
         # Agent B generates a response (it sees itself as assistant)
         response_b = chat_completion(
             client, model, messages_b, temperature=temperature, top_p=top_p
         )
-        response_b_parse = parse_dialogue_tags(response_b)
+        response_b = parse_dialogue_tags(response_b)
 
         # Update B's history: its own reply is assistant
-        messages_b.append({"role": "assistant", "content": response_b})
+        messages_b.append(
+            {
+                "role": "assistant",
+                "content": f"<reasoning>\n{response_b['think']}\n</reasoning>\n<responding>\n{response_b['respond']}\n</responding>",
+            }
+        )
         # Update A's history: B's reply is user (input for A)
-        messages_a.append({"role": "user", "content": response_b_parse["respond"]})
+        messages_a.append({"role": "user", "content": response_b["respond"]})
 
         # Record in output as assistant
-        output_messages.append({"role": "assistant", "content": response_b_parse["respond"], "reasoning": response_b_parse["think"]})
+        output_messages.append(
+            {
+                "role": "assistant",
+                "content": response_b["respond"],
+                "reasoning": response_b["think"],
+            }
+        )
 
     return output_messages
 
@@ -233,6 +260,8 @@ def save_conversation(
     """Save a conversation to a JSON file."""
     filename = f"session_{session_index:04d}.json"
     filepath = Path(output_dir) / filename
+    conversation = {"messages": conversation}
+
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(conversation, f, ensure_ascii=False, indent=2)
     print(f"Saved: {filepath}")
@@ -259,7 +288,7 @@ def main() -> None:
             opener = openers[session_idx % len(openers)]
             print(
                 f"Generating session {session_idx+1}/{args.num_sessions} "
-                f"with opener: {opener[:50]}...",
+                f"with opener: {opener["respond"][:50]}...",
                 flush=True,
             )
 
