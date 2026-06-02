@@ -16,8 +16,8 @@ import os
 import sys
 from pathlib import Path
 from typing import List, Dict
-
 from openai import OpenAI
+from pydantic import BaseModel
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -110,19 +110,24 @@ def chat_completion(
     max_retries: int = 3,
     temperature: float = 1.0,
     top_p: float = 0.95,
+    response_format: Dict = None,  # 新增：支持 JSON 模式
 ) -> str:
     """Send a chat completion request and return the response text."""
     last_exception = None
     for attempt in range(max_retries):
         try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                top_p=top_p,
-                frequency_penalty=1.5,
-                extra_body={"enable_thinking": False},
-            )
+            kwargs = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "top_p": top_p,
+                "frequency_penalty": 1.0,
+                "extra_body": {"enable_thinking": False},
+            }
+            if response_format is not None:
+                kwargs["response_format"] = response_format
+
+            response = client.chat.completions.create(**kwargs)
             return response.choices[0].message.content
         except Exception as e:
             print(
@@ -133,30 +138,6 @@ def chat_completion(
     raise RuntimeError(
         f"Chat completion failed after {max_retries} attempts"
     ) from last_exception
-
-
-def extract_tag_content(text: str, tag: str) -> str:
-    """提取指定标签内的文本，若结束标签缺失则提取到文本末尾。"""
-    start_tag = f"<{tag}>"
-    end_tag = f"</{tag}>"
-
-    start_idx = text.find(start_tag)
-    if start_idx == -1:
-        return ""
-
-    content_start = start_idx + len(start_tag)
-    end_idx = text.find(end_tag, content_start)
-
-    if end_idx == -1:
-        return text[content_start:]
-    return text[content_start:end_idx]
-
-
-def parse_dialogue_tags(text: str) -> Dict:
-    """解析对话文本，返回 (thinking, responding) 元组。"""
-    thinking = extract_tag_content(text, "reasoning")
-    responding = extract_tag_content(text, "responding")
-    return {"think": thinking, "respond": responding}
 
 
 def generate_conversation(
@@ -184,70 +165,119 @@ def generate_conversation(
     Final output is cleaned to contain only the exchange in the format:
         [user: A1, assistant: B1, user: A2, assistant: B2, ...]
     """
+
+    # Convert the opener to a JSON string for initializing Agent B's history.
+    opener_json = json.dumps(
+        {"think": opener["think"], "respond": opener["respond"]},
+        ensure_ascii=False,
+    )
+
     # Message histories for each agent, including system prompt and mapped roles
     messages_a = [
         {"role": "system", "content": prompt_a},
-        {"role": "user", "content": opener["respond"]},
-    ]
-    messages_b = [
-        {"role": "system", "content": prompt_b},
         {
-            "role": "assistant",
-            "content": f"<reasoning>\n{opener["think"]}\n</reasoning>\n<responding>\n{opener['respond']}\n</responding>",
+            "role": "user",
+            "content": f'{opener["respond"]}\n\n---\n\n按照以下格式输出：\n{{\n"think": "思考部分",\n"respond": "应答部分"\n}}',
         },
     ]
+    messages_b = [
+        {
+            "role": "system",
+            "content": f'{prompt_b}\n\n---\n\n按照以下格式输出：\n{{\n"think": "思考部分",\n"respond": "应答部分"\n}}',
+        },
+        {"role": "assistant", "content": f"{opener_json}"},
+    ]
 
-    # This will hold the final output (without prompts and opener)
+    # Final output (without prompts and opener)
     output_messages = []
+
+    # 启用 JSON 模式
+    class json_format_schema(BaseModel):
+        think: str
+        respond: str
+
+    json_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "chatbot",
+            "schema": json_format_schema.model_json_schema(),
+        },
+    }
 
     for _ in range(turns):
         # Agent A generates a response (it sees itself as assistant)
         response_a = chat_completion(
-            client, model, messages_a, temperature=temperature, top_p=top_p
+            client,
+            model,
+            messages_a,
+            temperature=temperature,
+            top_p=top_p,
+            response_format=json_format,
         )
-        response_a = parse_dialogue_tags(response_a)
+        response_a = json_format_schema.model_validate_json(response_a)
 
-        # Update A's history: its own reply is assistant
+        # Update A's history: its own reply is assistant (stored as JSON)
         messages_a.append(
             {
                 "role": "assistant",
-                "content": f"<reasoning>\n{response_a['think']}\n</reasoning>\n<responding>\n{response_a['respond']}\n</responding>",
+                "content": json.dumps(
+                    {"think": response_a.think, "respond": response_a.respond},
+                    ensure_ascii=False,
+                ),
             }
         )
-        # Update B's history: A's reply is user (input for B)
-        messages_b.append({"role": "user", "content": response_a["respond"]})
+        # Update B's history: A's reply is user (plain text)
+        messages_b.append(
+            {
+                "role": "user",
+                "content": f'{response_a.respond}\n\n---\n\n按照以下格式输出：\n{{\n"think": "思考部分",\n"respond": "应答部分"\n}}',
+            }
+        )
 
-        # Record in output as user (required final format)
+        # Record in output as user
         output_messages.append(
             {
                 "role": "user",
-                "content": response_a["respond"],
-                "reasoning": response_a["think"],
+                "reasoning": response_a.think,
+                "content": response_a.respond,
             }
         )
 
         # Agent B generates a response (it sees itself as assistant)
         response_b = chat_completion(
-            client, model, messages_b, temperature=temperature, top_p=top_p
+            client,
+            model,
+            messages_b,
+            temperature=temperature,
+            top_p=top_p,
+            response_format=json_format,
         )
-        response_b = parse_dialogue_tags(response_b)
+        response_b = json_format_schema.model_validate_json(response_b)
 
-        # Update B's history: its own reply is assistant
+        # Update B's history: its own reply is assistant (stored as JSON)
         messages_b.append(
             {
                 "role": "assistant",
-                "content": f"<reasoning>\n{response_b['think']}\n</reasoning>\n<responding>\n{response_b['respond']}\n</responding>",
+                "content": json.dumps(
+                    {"think": response_b.think, "respond": response_b.respond},
+                    ensure_ascii=False,
+                ),
             }
         )
-        # Update A's history: B's reply is user (input for A)
-        messages_a.append({"role": "user", "content": response_b["respond"]})
+        # Update A's history: B's reply is user (plain text)
+        messages_a.append(
+            {
+                "role": "user",
+                "content": f'{response_b.respond}\n\n---\n\n按照以下格式输出：\n{{\n"think": "思考部分",\n"respond": "应答部分"\n}}',
+            }
+        )
 
         # Record in output as assistant
         output_messages.append(
             {
                 "role": "assistant",
-                "content": response_b["respond"],
-                "reasoning": response_b["think"],
+                "reasoning": response_b.think,
+                "content": response_b.respond,
             }
         )
 
