@@ -177,13 +177,13 @@ def generate_conversation(
         {"role": "system", "content": prompt_a},
         {
             "role": "user",
-            "content": f'{opener["respond"]}\n\n---\n\n按照以下格式输出：\n{{\n"think": "思考部分",\n"respond": "应答部分"\n}}',
+            "content": f'{opener["respond"]}\n\n---\n\n按照以下json格式输出：\n{{\n"think": "思考部分",\n"respond": "应答部分"\n}}',
         },
     ]
     messages_b = [
         {
             "role": "system",
-            "content": f'{prompt_b}\n\n---\n\n按照以下格式输出：\n{{\n"think": "思考部分",\n"respond": "应答部分"\n}}',
+            "content": f'{prompt_b}\n\n---\n\n按照以下json格式输出：\n{{\n"think": "思考部分",\n"respond": "应答部分"\n}}',
         },
         {"role": "assistant", "content": f"{opener_json}"},
     ]
@@ -195,15 +195,9 @@ def generate_conversation(
     class json_format_schema(BaseModel):
         think: str
         respond: str
+    json_format = {"type": "json_object"}
 
-    json_format = {
-        "type": "json_schema",
-        "json_schema": {
-            "name": "chatbot",
-            "schema": json_format_schema.model_json_schema(),
-        },
-    }
-
+    # 按照目标轮数生成对话
     for _ in range(turns):
         # Agent A generates a response (it sees itself as assistant)
         response_a = chat_completion(
@@ -230,7 +224,7 @@ def generate_conversation(
         messages_b.append(
             {
                 "role": "user",
-                "content": f'{response_a.respond}\n\n---\n\n按照以下格式输出：\n{{\n"think": "思考部分",\n"respond": "应答部分"\n}}',
+                "content": f'{response_a.respond}\n\n---\n\n按照以下json格式输出：\n{{\n"think": "思考部分",\n"respond": "应答部分"\n}}',
             }
         )
 
@@ -268,7 +262,7 @@ def generate_conversation(
         messages_a.append(
             {
                 "role": "user",
-                "content": f'{response_b.respond}\n\n---\n\n按照以下格式输出：\n{{\n"think": "思考部分",\n"respond": "应答部分"\n}}',
+                "content": f'{response_b.respond}\n\n---\n\n按照以下json格式输出：\n{{\n"think": "思考部分",\n"respond": "应答部分"\n}}',
             }
         )
 

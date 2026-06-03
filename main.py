@@ -1,4 +1,3 @@
-import unsloth_model as um
 import os
 
 os.environ["UNSLOTH_USE_MODELSCOPE"] = "1"
@@ -76,7 +75,8 @@ def get_args():
 ### Main function
 if __name__ == "__main__":
     args = get_args()
-
+    
+    import unsloth_model as um
     model, tokenizer = um.import_model(args.model_path, 0.95, False)
 
     if tokenizer.pad_token == "<|PAD_TOKEN|>":
