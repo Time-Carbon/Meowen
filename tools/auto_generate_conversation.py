@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 from typing import List, Dict
 from openai import OpenAI
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -35,8 +35,22 @@ def parse_arguments() -> argparse.Namespace:
         default="https://api.openai.com/v1",
         help="Base URL for API requests (default: OpenAI)",
     )
-    parser.add_argument("--temperature", default=1.0, type=float, help="Temperature")
-    parser.add_argument("--top_p", default=0.95, type=float, help="Top P")
+    parser.add_argument(
+        "--temperature", default=1.0, type=float, help="Temperature (default=1.0)"
+    )
+    parser.add_argument(
+        "--frequency_penalty",
+        default=1.0,
+        type=float,
+        help="Frequency penalty (default=1.0)",
+    )
+    parser.add_argument(
+        "--top_p", default=0.95, type=float, help="Top P (default=0.95)"
+    )
+    parser.add_argument(
+        "--min_p", default=0.05, type=float, help="Min P (default=0.05)"
+    )
+    parser.add_argument("--top_k", default=20, type=int, help="Top K (default=20)")
     parser.add_argument("--model", required=True, help="Model name to use")
     parser.add_argument(
         "--num-sessions",
@@ -109,7 +123,10 @@ def chat_completion(
     messages: List[Dict],
     max_retries: int = 3,
     temperature: float = 1.0,
+    frequency_penalty: float = 1.0,
     top_p: float = 0.95,
+    min_p: float = 0.05,
+    top_k: float = 20,
     response_format: Dict = None,  # 新增：支持 JSON 模式
 ) -> str:
     """Send a chat completion request and return the response text."""
@@ -121,8 +138,12 @@ def chat_completion(
                 "messages": messages,
                 "temperature": temperature,
                 "top_p": top_p,
-                "frequency_penalty": 1.0,
-                "extra_body": {"enable_thinking": False},
+                "frequency_penalty": frequency_penalty,
+                "extra_body": {
+                    "enable_thinking": False,
+                    "top_k": top_k,
+                    "min_p": min_p,
+                },
             }
             if response_format is not None:
                 kwargs["response_format"] = response_format
@@ -148,7 +169,10 @@ def generate_conversation(
     opener: Dict,
     turns: int = 10,
     top_p: float = 0.95,
+    min_p: float = 0.05,
+    top_k: float = 20,
     temperature: float = 1.0,
+    frequency_penalty: float = 1.0,
 ) -> List[Dict]:
     """
     Generate a multi-turn conversation using perspective switching.
@@ -166,26 +190,29 @@ def generate_conversation(
         [user: A1, assistant: B1, user: A2, assistant: B2, ...]
     """
 
-    # Convert the opener to a JSON string for initializing Agent B's history.
-    opener_json = json.dumps(
-        {"think": opener["think"], "respond": opener["respond"]},
+    # Convert the opener to a JSON string for initializing Agent A's history.
+    opener_a = json.dumps(
+        {"query": opener["respond"]},
         ensure_ascii=False,
     )
 
     # Message histories for each agent, including system prompt and mapped roles
     messages_a = [
         {"role": "system", "content": prompt_a},
-        {
-            "role": "user",
-            "content": f'{opener["respond"]}\n\n---\n\n按照以下json格式输出：\n{{\n"think": "思考部分",\n"respond": "应答部分"\n}}',
-        },
+        {"role": "user", "content": opener_a},
     ]
+
+    # Convert the opener to a JSON string for initializing Agent B's history.
+    opener_b = json.dumps(
+        {"think": opener["think"], "respond": opener["respond"]},
+        ensure_ascii=False,
+    )
     messages_b = [
         {
             "role": "system",
-            "content": f'{prompt_b}\n\n---\n\n按照以下json格式输出：\n{{\n"think": "思考部分",\n"respond": "应答部分"\n}}',
+            "content": f"{prompt_b}",
         },
-        {"role": "assistant", "content": f"{opener_json}"},
+        {"role": "assistant", "content": opener_b},
     ]
 
     # Final output (without prompts and opener)
@@ -193,9 +220,22 @@ def generate_conversation(
 
     # 启用 JSON 模式
     class json_format_schema(BaseModel):
-        think: str
-        respond: str
-    json_format = {"type": "json_object"}
+        reasoning: str = Field(
+            description="用于输出角色的内心独白",
+            strict=True,
+        )
+        responding: str = Field(
+            description="用于输出角色的对话内容及场景描述",
+            strict=True,
+        )
+
+    json_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "chatbot",
+            "schema": json_format_schema.model_json_schema(),
+        },
+    }
 
     # 按照目标轮数生成对话
     for _ in range(turns):
@@ -205,26 +245,30 @@ def generate_conversation(
             model,
             messages_a,
             temperature=temperature,
+            frequency_penalty=frequency_penalty,
             top_p=top_p,
+            min_p=min_p,
+            top_k=top_k,
             response_format=json_format,
         )
         response_a = json_format_schema.model_validate_json(response_a)
 
-        # Update A's history: its own reply is assistant (stored as JSON)
+        # Update A's history: its own reply is assistant
         messages_a.append(
             {
                 "role": "assistant",
-                "content": json.dumps(
-                    {"think": response_a.think, "respond": response_a.respond},
-                    ensure_ascii=False,
+                "content": json_format_schema.model_dump_json(
+                    self=response_a, ensure_ascii=False
                 ),
             }
         )
-        # Update B's history: A's reply is user (plain text)
+        # Update B's history: A's reply is user
         messages_b.append(
             {
                 "role": "user",
-                "content": f'{response_a.respond}\n\n---\n\n按照以下json格式输出：\n{{\n"think": "思考部分",\n"respond": "应答部分"\n}}',
+                "content": json.dumps(
+                    {"query": response_a.responding}, ensure_ascii=False
+                ),
             }
         )
 
@@ -232,8 +276,8 @@ def generate_conversation(
         output_messages.append(
             {
                 "role": "user",
-                "reasoning": response_a.think,
-                "content": response_a.respond,
+                "reasoning": response_a.reasoning,
+                "content": response_a.responding,
             }
         )
 
@@ -243,26 +287,30 @@ def generate_conversation(
             model,
             messages_b,
             temperature=temperature,
+            frequency_penalty=frequency_penalty,
             top_p=top_p,
+            min_p=min_p,
+            top_k=top_k,
             response_format=json_format,
         )
         response_b = json_format_schema.model_validate_json(response_b)
 
-        # Update B's history: its own reply is assistant (stored as JSON)
+        # Update B's history: its own reply is assistant
         messages_b.append(
             {
                 "role": "assistant",
-                "content": json.dumps(
-                    {"think": response_b.think, "respond": response_b.respond},
-                    ensure_ascii=False,
+                "content": json_format_schema.model_dump_json(
+                    self=response_b, ensure_ascii=False
                 ),
             }
         )
-        # Update A's history: B's reply is user (plain text)
+        # Update A's history: B's reply is user
         messages_a.append(
             {
                 "role": "user",
-                "content": f'{response_b.respond}\n\n---\n\n按照以下json格式输出：\n{{\n"think": "思考部分",\n"respond": "应答部分"\n}}',
+                "content": json.dumps(
+                    {"query": response_b.responding}, ensure_ascii=False
+                ),
             }
         )
 
@@ -270,8 +318,8 @@ def generate_conversation(
         output_messages.append(
             {
                 "role": "assistant",
-                "reasoning": response_b.think,
-                "content": response_b.respond,
+                "reasoning": response_b.reasoning,
+                "content": response_b.responding,
             }
         )
 
@@ -324,7 +372,10 @@ def main() -> None:
                 opener=opener,
                 turns=args.turns,
                 temperature=args.temperature,
+                frequency_penalty=args.frequency_penalty,
+                min_p=args.min_p,
                 top_p=args.top_p,
+                top_k=args.top_k,
             )
 
             save_conversation(conversation, args.output_dir, session_idx + 1)
