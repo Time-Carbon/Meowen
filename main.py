@@ -9,7 +9,7 @@ max_SFT_context = 1
 ### Dataset process
 
 
-def make_SFT_conversation(dataset, tokenizer):
+def make_CPT_conversation(dataset, tokenizer):
 
     prompt = dataset["text"]
 
@@ -18,6 +18,38 @@ def make_SFT_conversation(dataset, tokenizer):
         max_SFT_context = len(prompt)
 
     return {"text": prompt}
+
+
+def make_SFT_conversation(dataset, tokenizer):
+
+    prompts = dataset["messages"]
+    conversation = []
+
+    for prompt in prompts:
+        if prompt["role"] == "user":
+            conversation.append(
+                {
+                    "role": "user",
+                    "content": prompt["content"]
+                }
+            )
+        elif prompt["role"] == "assistant":
+            conversation.append(
+                {
+                    "role": "assistant",
+                    "content": f"<think>\n{prompt["reasoning"]}\n</think>\n\n{prompt["content"]}"
+                }
+            )
+
+    text = tokenizer.apply_chat_template(
+        conversation, tokenize=False, add_generation_prompt=False
+    )
+
+    global max_SFT_context
+    if max_SFT_context < len(text):
+        max_SFT_context = len(text)
+
+    return {"text": text}
 
 
 ### Get args
@@ -67,6 +99,14 @@ def get_args():
     parser.add_argument(
         "--resume", action="store_true", help="是否从 checkpoint 恢复训练"
     )
+    parser.add_argument(
+        "--lora",
+        action="store_true",
+        help="加载的模型是否是已训练好的 LoRA 模型",
+    )
+    parser.add_argument(
+        "--continue_pretrain", action="store_true", help="是否进行CPT (继续预训练) "
+    )
     parser.add_argument("--test_size", type=float, default=0.1, help="验证集划分比例")
 
     return parser.parse_args()
@@ -75,23 +115,36 @@ def get_args():
 ### Main function
 if __name__ == "__main__":
     args = get_args()
-    
+
     import unsloth_model as um
+
     model, tokenizer = um.import_model(args.model_path, 0.95, False)
 
     if tokenizer.pad_token == "<|PAD_TOKEN|>":
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
-    lora = um.create_lora(model, args.lora_rank)
+    if args.lora == False:
+        lora = um.create_lora(model, args.lora_rank)
+    else:
+        lora = model
 
-    sft_dataset = um.load_data(
-        path=args.sft_dataset_path,
-        tokenizer=tokenizer,
-        load_from_cache=False,
-        cache_dir=args.cache_dir,
-        mapper_func=make_SFT_conversation,
-    )
+    if args.continue_pretrain == False:
+        sft_dataset = um.load_data(
+            path=args.sft_dataset_path,
+            tokenizer=tokenizer,
+            load_from_cache=False,
+            cache_dir=args.cache_dir,
+            mapper_func=make_SFT_conversation,
+        )
+    else:
+        sft_dataset = um.load_data(
+            path=args.sft_dataset_path,
+            tokenizer=tokenizer,
+            load_from_cache=False,
+            cache_dir=args.cache_dir,
+            mapper_func=make_CPT_conversation,
+        )
 
     sft_dataset = sft_dataset.train_test_split(test_size=args.test_size, shuffle=False)
 
