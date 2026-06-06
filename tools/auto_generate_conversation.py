@@ -215,8 +215,19 @@ def generate_conversation(
         {"role": "assistant", "content": opener_b},
     ]
 
-    # Final output (without prompts and opener)
-    output_messages = []
+    # Final output
+    output_messages = [
+        {
+            "role": "system",
+            "reasoning": "",
+            "content": prompt_a,
+        },
+        {
+            "role": "user",
+            "reasoning": "",
+            "content": opener["respond"],
+        },
+    ]
 
     # 启用 JSON 模式
     class json_format_schema(BaseModel):
@@ -225,7 +236,7 @@ def generate_conversation(
             strict=True,
         )
         responding: str = Field(
-            description="用于输出角色的对话内容及场景描述",
+            description="用于输出角色的外在表达",
             strict=True,
         )
 
@@ -275,7 +286,7 @@ def generate_conversation(
         # Record in output as user
         output_messages.append(
             {
-                "role": "user",
+                "role": "assistant",
                 "reasoning": response_a.reasoning,
                 "content": response_a.responding,
             }
@@ -317,8 +328,8 @@ def generate_conversation(
         # Record in output as assistant
         output_messages.append(
             {
-                "role": "assistant",
-                "reasoning": response_b.reasoning,
+                "role": "user",
+                "reasoning": "",
                 "content": response_b.responding,
             }
         )

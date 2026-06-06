@@ -26,14 +26,14 @@ def make_SFT_conversation(dataset, tokenizer):
     conversation = []
 
     for prompt in prompts:
-        if prompt["role"] == "user":
+        if prompt["role"] != "assistant":
             conversation.append(
                 {
-                    "role": "user",
+                    "role": prompt["role"],
                     "content": prompt["content"]
                 }
             )
-        elif prompt["role"] == "assistant":
+        else:
             conversation.append(
                 {
                     "role": "assistant",
