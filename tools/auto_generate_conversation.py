@@ -190,6 +190,25 @@ def generate_conversation(
         [user: A1, assistant: B1, user: A2, assistant: B2, ...]
     """
 
+    # 启用 JSON 模式
+    class json_format_schema(BaseModel):
+        reasoning: str = Field(
+            description="用于输出角色的内心独白",
+            strict=True,
+        )
+        responding: str = Field(
+            description="用于输出角色的外在表达",
+            strict=True,
+        )
+
+    json_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "chatbot",
+            "schema": json_format_schema.model_json_schema(),
+        },
+    }
+
     # Convert the opener to a JSON string for initializing Agent A's history.
     opener_a = json.dumps(
         {"query": opener["respond"]},
@@ -203,8 +222,8 @@ def generate_conversation(
     ]
 
     # Convert the opener to a JSON string for initializing Agent B's history.
-    opener_b = json.dumps(
-        {"think": opener["think"], "respond": opener["respond"]},
+    opener_b = json_format_schema.model_dump_json(
+        json_format_schema(reasoning=opener["think"], responding=opener["respond"]),
         ensure_ascii=False,
     )
     messages_b = [
@@ -229,27 +248,8 @@ def generate_conversation(
         },
     ]
 
-    # 启用 JSON 模式
-    class json_format_schema(BaseModel):
-        reasoning: str = Field(
-            description="用于输出角色的内心独白",
-            strict=True,
-        )
-        responding: str = Field(
-            description="用于输出角色的外在表达",
-            strict=True,
-        )
-
-    json_format = {
-        "type": "json_schema",
-        "json_schema": {
-            "name": "chatbot",
-            "schema": json_format_schema.model_json_schema(),
-        },
-    }
-
     # 按照目标轮数生成对话
-    for _ in range(turns):
+    for i in range(turns):
         # Agent A generates a response (it sees itself as assistant)
         response_a = chat_completion(
             client,
@@ -293,46 +293,47 @@ def generate_conversation(
         )
 
         # Agent B generates a response (it sees itself as assistant)
-        response_b = chat_completion(
-            client,
-            model,
-            messages_b,
-            temperature=temperature,
-            frequency_penalty=frequency_penalty,
-            top_p=top_p,
-            min_p=min_p,
-            top_k=top_k,
-            response_format=json_format,
-        )
-        response_b = json_format_schema.model_validate_json(response_b)
+        if i < (turns - 1):
+            response_b = chat_completion(
+                client,
+                model,
+                messages_b,
+                temperature=temperature,
+                frequency_penalty=frequency_penalty,
+                top_p=top_p,
+                min_p=min_p,
+                top_k=top_k,
+                response_format=json_format,
+            )
+            response_b = json_format_schema.model_validate_json(response_b)
 
-        # Update B's history: its own reply is assistant
-        messages_b.append(
-            {
-                "role": "assistant",
-                "content": json_format_schema.model_dump_json(
-                    self=response_b, ensure_ascii=False
-                ),
-            }
-        )
-        # Update A's history: B's reply is user
-        messages_a.append(
-            {
-                "role": "user",
-                "content": json.dumps(
-                    {"query": response_b.responding}, ensure_ascii=False
-                ),
-            }
-        )
+            # Update B's history: its own reply is assistant
+            messages_b.append(
+                {
+                    "role": "assistant",
+                    "content": json_format_schema.model_dump_json(
+                        self=response_b, ensure_ascii=False
+                    ),
+                }
+            )
+            # Update A's history: B's reply is user
+            messages_a.append(
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {"query": response_b.responding}, ensure_ascii=False
+                    ),
+                }
+            )
 
-        # Record in output as assistant
-        output_messages.append(
-            {
-                "role": "user",
-                "reasoning": "",
-                "content": response_b.responding,
-            }
-        )
+            # Record in output as assistant
+            output_messages.append(
+                {
+                    "role": "user",
+                    "reasoning": "",
+                    "content": response_b.responding,
+                }
+            )
 
     return output_messages
 

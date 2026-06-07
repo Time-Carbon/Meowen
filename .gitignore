@@ -7,6 +7,7 @@ model/*
 
 # LoRA 与训练输出
 lora
+lora_base
 lora_cache
 cache
 unsloth_training_checkpoints
