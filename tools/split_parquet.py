@@ -24,13 +24,17 @@ def load_parquet_files(folder: str) -> pd.DataFrame:
     return combined
 
 
-def shuffle_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+def shuffle_dataframe(df: pd.DataFrame, shuffle: bool) -> pd.DataFrame:
     """随机打乱 DataFrame 的行顺序。"""
     raw_size = len(df)
     df = df.drop_duplicates()
     duplicated_size = len(df)
     print(f"去重{raw_size - duplicated_size}行")
-    return df.sample(frac=1, random_state=42).reset_index(drop=True)
+    if shuffle:
+        print("正在打乱数据...")
+        return df.sample(frac=1, random_state=42).reset_index(drop=True)
+    else:
+        return df
 
 
 def split_by_char_count(
@@ -90,7 +94,7 @@ def save_shards(
 
 
 def process_parquet(
-    input_dir: str, output_dir: str, char_limit: int = 10_000_000
+    input_dir: str, output_dir: str, char_limit: int = 10_000_000, shuffle: bool = False
 ) -> None:
     """
     完整处理流程：
@@ -103,8 +107,7 @@ def process_parquet(
     df = load_parquet_files(input_dir)
     print(f"加载完成，共 {len(df)} 行。")
 
-    print("正在打乱数据...")
-    df = shuffle_dataframe(df)
+    df = shuffle_dataframe(df, shuffle)
 
     print(f"正在按每 {char_limit} 字符进行分片...")
     shards = split_by_char_count(df, char_limit)
@@ -121,6 +124,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="按字符数分片 parquet 文本数据")
     parser.add_argument("input_dir", help="包含 .parquet 文件的输入文件夹")
     parser.add_argument("output_dir", help="输出分片的目标文件夹")
+    parser.add_argument("--shuffle", action="store_true", help="进行数据打乱")
     parser.add_argument(
         "--char-limit",
         type=int,
@@ -129,4 +133,4 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    process_parquet(args.input_dir, args.output_dir, args.char_limit)
+    process_parquet(args.input_dir, args.output_dir, args.char_limit, args.shuffle)

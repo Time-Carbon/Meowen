@@ -107,6 +107,9 @@ def get_args():
     parser.add_argument(
         "--continue_pretrain", action="store_true", help="是否进行CPT (继续预训练) "
     )
+    parser.add_argument(
+        "--cuda_um", action="store_true", help="是否使用CUDA统一内存进行训练"
+    )
     parser.add_argument("--test_size", type=float, default=0.1, help="验证集划分比例")
 
     return parser.parse_args()
