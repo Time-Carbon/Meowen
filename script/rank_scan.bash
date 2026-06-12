@@ -1,6 +1,6 @@
 #!/usr/bin/bash
 
-rank=(8 16 32 64 128 256)
+rank=(32 64 96 128 160)
 
 for r in ${rank[@]};do
     python main.py \
