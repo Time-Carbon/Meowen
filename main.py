@@ -62,7 +62,7 @@ def get_args():
     # 路径参数
     parser.add_argument("--model_path", type=str, required=True, help="预训练模型路径")
     parser.add_argument(
-        "--sft_dataset_path", type=str, required=True, help="SFT 数据集路径"
+        "--dataset_path", type=str, required=True, help="SFT 数据集路径"
     )
     parser.add_argument(
         "--cache_dir", type=str, default="./cache", help="数据集缓存目录"
@@ -134,7 +134,7 @@ if __name__ == "__main__":
 
     if args.continue_pretrain == False:
         sft_dataset = um.load_data(
-            path=args.sft_dataset_path,
+            path=args.dataset_path,
             tokenizer=tokenizer,
             load_from_cache=False,
             cache_dir=args.cache_dir,
@@ -142,7 +142,7 @@ if __name__ == "__main__":
         )
     else:
         sft_dataset = um.load_data(
-            path=args.sft_dataset_path,
+            path=args.dataset_path,
             tokenizer=tokenizer,
             load_from_cache=False,
             cache_dir=args.cache_dir,

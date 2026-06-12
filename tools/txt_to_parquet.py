@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """
-流式处理文本文件夹，按字符数分片并保存为 Parquet 文件。
+流式处理文本文件夹或 ZIP 包，按字符数分片并保存为 Parquet 文件。
 
 用法：
+    # 处理文件夹
     python split_txt_to_parquet.py --input_dir ./txt_data --output_dir ./chunks
+    # 处理 ZIP 文件
+    python split_txt_to_parquet.py --input_dir ./data.zip --output_dir ./chunks
 """
 
 import os
 import glob
 import argparse
 from pathlib import Path
+import zipfile
 
 import pandas as pd
 
@@ -50,7 +54,7 @@ def stream_split_and_save(
     chunk_size_chars: int = 1_000_000,
 ) -> None:
     """
-    流式处理文件夹中的所有 .txt 文件，按字符数分片并保存为 Parquet。
+    流式处理文件夹或 ZIP 中的所有 .txt 文件，按字符数分片并保存为 Parquet。
 
     分片规则：
         - 每个分片尽量接近 chunk_size_chars 字符。
@@ -59,50 +63,69 @@ def stream_split_and_save(
         - 采用流式读取，一次仅将一个文件的部分内容载入内存。
 
     Args:
-        input_dir: 输入文件夹路径（包含 .txt 文件）。
+        input_dir: 输入路径（文件夹路径或 .zip 文件路径）。
         output_dir: 输出文件夹路径（保存 .parquet 分片文件）。
         chunk_size_chars: 每个分片的目标字符数（默认 100 万）。
-        read_buffer: 每次从文件中读取的字符数（默认 10000）。
     """
     # 确保输出目录存在
     Path(output_dir).mkdir(parents=True, exist_ok=True)
-
-    txt_files = collect_txt_files(input_dir)
-    if not txt_files:
-        print(f"在 {input_dir} 中未找到任何 .txt 文件。")
-        return
 
     current_chunk = []
     current_len = 0
     chunk_index = 0
 
-    for file_path in txt_files:
-        print(f"处理文件: {file_path}")
-        with open(file_path, "r", encoding="utf-8") as f:
-            while True:
-                block = f.read()
-                if not block:
-                    break
+    if os.path.isfile(input_dir) and input_dir.lower().endswith('.zip'):
+        print(f"检测到 ZIP 文件: {input_dir}")
+        with zipfile.ZipFile(input_dir, 'r') as zf:
+            # 获取所有 .txt 文件（按名称排序，保证顺序一致）
+            txt_files = [f for f in zf.namelist() if f.lower().endswith('.txt')]
+            txt_files.sort()
+            if not txt_files:
+                print(f"在 ZIP 文件中未找到任何 .txt 文件。")
+                return
 
-                # 若当前块能放入当前分片，则直接追加
-                if current_len + len(block) <= chunk_size_chars:
-                    current_chunk.append(block)
-                    current_len += len(block)
-                else:
-                    # 保存当前分片（如果不为空）
-                    if current_chunk:
-                        out_file = os.path.join(
-                            output_dir, f"chunk_{chunk_index:06d}.parquet"
-                        )
-                        save_chunk_as_parquet(current_chunk, out_file)
-                        print(
-                            f"  保存分片 {chunk_index:06d} ({len(current_chunk)} 字符)"
-                        )
-                        chunk_index += 1
+            for file_path in txt_files:
+                print(f"处理 ZIP 内文件: {file_path}")
+                with zf.open(file_path, 'r') as f:
+                    # 读取整个文件内容并解码为 UTF-8 字符串
+                    content = f.read().decode('utf-8')
+                    # 根据字符数决定是否分片
+                    if current_len + len(content) <= chunk_size_chars:
+                        current_chunk.append(content)
+                        current_len += len(content)
+                    else:
+                        if current_chunk:
+                            out_file = os.path.join(output_dir, f"chunk_{chunk_index:06d}.parquet")
+                            save_chunk_as_parquet(current_chunk, out_file)
+                            print(f"  保存分片 {chunk_index:06d} ({current_len} 字符)")
+                            chunk_index += 1
+                        current_chunk = [content]
+                        current_len = len(content)
+    else:
+        txt_files = collect_txt_files(input_dir)
+        if not txt_files:
+            print(f"在 {input_dir} 中未找到任何 .txt 文件。")
+            return
 
-                    # 当前块作为新分片的开头（不截断）
-                    current_chunk = [block]
-                    current_len = len(block)
+        for file_path in txt_files:
+            print(f"处理文件: {file_path}")
+            with open(file_path, "r", encoding="utf-8") as f:
+                while True:
+                    block = f.read()
+                    if not block:
+                        break
+
+                    if current_len + len(block) <= chunk_size_chars:
+                        current_chunk.append(block)
+                        current_len += len(block)
+                    else:
+                        if current_chunk:
+                            out_file = os.path.join(output_dir, f"chunk_{chunk_index:06d}.parquet")
+                            save_chunk_as_parquet(current_chunk, out_file)
+                            print(f"  保存分片 {chunk_index:06d} ({current_len} 字符)")
+                            chunk_index += 1
+                        current_chunk = [block]
+                        current_len = len(block)
 
     # 保存最后一个分片
     if current_chunk:
@@ -113,12 +136,12 @@ def stream_split_and_save(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="将文件夹中的所有 .txt 文件按字符数分片并保存为 Parquet 格式"
+        description="将文件夹或 ZIP 包中的所有 .txt 文件按字符数分片并保存为 Parquet 格式"
     )
     parser.add_argument(
         "--input_dir",
         required=True,
-        help="包含 .txt 文件的输入文件夹路径",
+        help="包含 .txt 文件的输入文件夹路径，或 .zip 文件路径",
     )
     parser.add_argument(
         "--output_dir",
