@@ -1,7 +1,7 @@
 from .RL import GRPOtrain
-from .SFT import SFTtrain
+from .SFT import modelTrainer
 
 __all__=[
-    "SFTtrain",
+    "modelTrainer",
     "GRPOtrain"
 ]

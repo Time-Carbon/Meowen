@@ -94,7 +94,7 @@ def get_args():
     parser.add_argument("--eval_accumulation_steps", type=int, default=4)
     parser.add_argument("--max_grad_norm", type=float, default=1.0)
     parser.add_argument("--eval_steps", type=int, default=400)
-    parser.add_argument("--patience", type=int, default=3, help="早停 patience")
+    parser.add_argument("--patience", type=int, default=0, help="早停 patience")
     parser.add_argument("--threshold", type=float, default=1e-3, help="早停阈值")
     parser.add_argument(
         "--resume", action="store_true", help="是否从 checkpoint 恢复训练"
@@ -133,7 +133,7 @@ if __name__ == "__main__":
         lora = model
 
     if args.continue_pretrain == False:
-        sft_dataset = um.load_data(
+        dataset = um.load_data(
             path=args.dataset_path,
             tokenizer=tokenizer,
             load_from_cache=False,
@@ -141,7 +141,7 @@ if __name__ == "__main__":
             mapper_func=make_SFT_conversation,
         )
     else:
-        sft_dataset = um.load_data(
+        dataset = um.load_data(
             path=args.dataset_path,
             tokenizer=tokenizer,
             load_from_cache=False,
@@ -149,15 +149,16 @@ if __name__ == "__main__":
             mapper_func=make_CPT_conversation,
         )
 
-    sft_dataset = sft_dataset.train_test_split(test_size=args.test_size, shuffle=False)
+    dataset = dataset.train_test_split(test_size=args.test_size, shuffle=False)
 
-    um.SFTtrain(
+    um.modelTrainer(
+        cpt=args.continue_pretrain,
         resume=args.resume,
         threshold=args.threshold,
         patience=args.patience,
         lora=lora,
         tokenizer=tokenizer,
-        dataset=sft_dataset,
+        dataset=dataset,
         lr=args.lr,
         regularization=args.regularization,
         max_SFT_context=max_SFT_context,
