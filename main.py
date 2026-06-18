@@ -86,7 +86,7 @@ def get_args():
 
     # 其他常用训练参数
     parser.add_argument(
-        "--regularization", type=float, default=1e-4, help="权重衰减正则化系数"
+        "--regularization", type=float, default=0, help="权重衰减正则化系数"
     )
     parser.add_argument("--per_device_train_batch_size", type=int, default=8)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
