@@ -1,12 +1,16 @@
 import os
+import numpy as np
 import pandas as pd
-from typing import List
+import pyarrow.parquet as pq
+from typing import List, Iterator, Tuple
+import argparse
 
 
-def load_parquet_files(folder: str) -> pd.DataFrame:
+def get_total_rows_and_file_info(folder: str) -> Tuple[int, List[dict]]:
     """
-    自动加载指定文件夹下所有 .parquet 文件，合并为一个 DataFrame。
-    要求每个文件必须包含 'text' 列。
+    扫描文件夹下所有 .parquet 文件，返回总行数以及每个文件的元信息。
+    元信息列表：每个元素为 dict，包含 'path', 'num_rows', 'row_groups'。
+    row_groups: 列表，每个元素为 (起始全局索引, 行组内行数)
     """
     parquet_files = [
         os.path.join(folder, f) for f in os.listdir(folder) if f.endswith(".parquet")
@@ -14,68 +18,120 @@ def load_parquet_files(folder: str) -> pd.DataFrame:
     if not parquet_files:
         raise FileNotFoundError(f"在文件夹 {folder} 中未找到 .parquet 文件")
 
-    frames = []
-    for file_path in parquet_files:
-        df = pd.read_parquet(file_path)
-        if "text" not in df.columns:
-            raise ValueError(f"文件 {file_path} 缺少必需的 'text' 列")
-        frames.append(df[["text"]])  # 只保留 text 列
-    combined = pd.concat(frames, ignore_index=True)
-    return combined
+    file_infos = []
+    global_offset = 0
+    for path in parquet_files:
+        pf = pq.ParquetFile(path)
+        num_rows = pf.metadata.num_rows
+        # 获取每个行组的行数
+        rg_offsets = []
+        for rg in range(pf.metadata.num_row_groups):
+            rg_metadata = pf.metadata.row_group(rg)
+            rg_num_rows = rg_metadata.num_rows
+            rg_offsets.append((global_offset, rg_num_rows))
+            global_offset += rg_num_rows
+        file_infos.append(
+            {"path": path, "num_rows": num_rows, "row_groups": rg_offsets}
+        )
+    return global_offset, file_infos
 
 
-def shuffle_dataframe(df: pd.DataFrame, shuffle: bool) -> pd.DataFrame:
-    """随机打乱 DataFrame 的行顺序。"""
-    raw_size = len(df)
-    df = df.drop_duplicates()
-    duplicated_size = len(df)
-    print(f"去重{raw_size - duplicated_size}行")
-    if shuffle:
-        print("正在打乱数据...")
-        return df.sample(frac=1, random_state=42).reset_index(drop=True)
-    else:
-        return df
+def generate_permutation_on_disk(n: int, seed: int = 42) -> np.memmap:
+    """在磁盘上生成一个随机排列，并返回 memmap 对象。"""
+    # 创建临时文件存放排列，使用 np.memmap
+    perm_file = "permutation.npy"
+    perm = np.memmap(perm_file, dtype=np.int64, mode="w+", shape=(n,))
+    perm[:] = np.arange(n, dtype=np.int64)
+    # 用指定随机种子打乱
+    rng = np.random.RandomState(seed)
+    rng.shuffle(perm)  # 原地打乱
+    return perm
 
 
-def split_by_char_count(
-    df: pd.DataFrame, char_limit: int = 10_000_000
+def iter_shuffled_rows(
+    perm: np.memmap, file_infos: List[dict], batch_size: int = 10000
+) -> Iterator[pd.Series]:
+    """
+    按随机排列顺序逐批生成行（pandas Series 对象），每次生成 batch_size 行。
+    内部会批量读取原始文件，减少 I/O 次数。
+    """
+    total = len(perm)
+    # 构建索引到 (file_idx, rg_idx, offset_in_rg) 的快速查找
+    # 因为需要多次二分查找，构建一个列表 (start_global_index, file_idx, rg_idx)
+    index_map = []
+    for fi, info in enumerate(file_infos):
+        for rg_idx, (start, rg_rows) in enumerate(info["row_groups"]):
+            index_map.append((start, fi, rg_idx, rg_rows))
+    # 按 start 排序以支持二分
+    index_map.sort(key=lambda x: x[0])
+    starts = [x[0] for x in index_map]
+
+    def locate_global_index(global_idx: int):
+        """根据全局索引返回 (file_idx, rg_idx, offset_in_rg)"""
+        # 二分查找最后一个 start <= global_idx
+        pos = np.searchsorted(starts, global_idx, side="right") - 1
+        start, fi, rg_idx, rg_rows = index_map[pos]
+        offset = global_idx - start
+        return fi, rg_idx, offset
+
+    for batch_start in range(0, total, batch_size):
+        batch_indices = perm[
+            batch_start : batch_start + batch_size
+        ]  # 这是排列中的一段，已经乱序
+        # 按文件分组，批量读取
+        file_group = {}  # file_idx -> list of (rg_idx, offset)
+        # 先收集所有需要的行
+        for global_idx in batch_indices:
+            fi, rg_idx, offset = locate_global_index(global_idx)
+            file_group.setdefault(fi, []).append((rg_idx, offset, global_idx))
+
+        # 按文件处理
+        rows_with_idx = []  # 存储 (global_idx, text)
+        for fi, items in file_group.items():
+            path = file_infos[fi]["path"]
+            pf = pq.ParquetFile(path)
+            # 按行组分组，一次读取一个行组中需要的所有行
+            rg_items = {}
+            for rg_idx, offset, gidx in items:
+                rg_items.setdefault(rg_idx, []).append((offset, gidx))
+            for rg_idx, offsets in rg_items.items():
+                # 读取整个行组（只读 text 列）
+                table = pf.read_row_group(rg_idx, columns=["text"])
+                df_rg = table.to_pandas()
+                # 提取需要的行
+                for offset, gidx in offsets:
+                    text = df_rg.iloc[offset]["text"]
+                    rows_with_idx.append((gidx, text))
+        # 按 global_idx 排序，恢复批次内顺序
+        rows_with_idx.sort(key=lambda x: x[0])
+        for _, text in rows_with_idx:
+            yield text
+
+
+def split_by_char_count_stream(
+    row_iterator: Iterator[str], char_limit: int = 10_000_000
 ) -> List[pd.DataFrame]:
-    """
-    按字符数对 DataFrame 进行分片，保证每一行的文本完整不被切割。
-    若某一行本身的字符数 >= char_limit，则单独作为一个分片。
-    """
+    """与原始 split_by_char_count 逻辑相同，但输入为迭代器。"""
     shards = []
     buffer_rows = []
     buffer_chars = 0
-
-    for _, row in df.iterrows():
-        text = row["text"]
+    for text in row_iterator:
         text_len = len(text)
-
-        # 处理超长行：直接单独成为一个分片
         if text_len >= char_limit:
-            # 先保存当前缓冲区
             if buffer_rows:
                 shards.append(pd.DataFrame(buffer_rows, columns=["text"]))
                 buffer_rows = []
                 buffer_chars = 0
-            shards.append(pd.DataFrame([row], columns=["text"]))
+            shards.append(pd.DataFrame([{"text": text}], columns=["text"]))
             continue
-
-        # 如果加入当前行会超出限制，则保存当前缓冲区并开始新的缓冲区
         if buffer_chars + text_len > char_limit:
             shards.append(pd.DataFrame(buffer_rows, columns=["text"]))
             buffer_rows = []
             buffer_chars = 0
-
-        # 将当前行加入缓冲区
-        buffer_rows.append(row)
+        buffer_rows.append({"text": text})
         buffer_chars += text_len
-
-    # 保存剩余的缓冲区
     if buffer_rows:
         shards.append(pd.DataFrame(buffer_rows, columns=["text"]))
-
     return shards
 
 
@@ -93,28 +149,46 @@ def save_shards(
         print(f"已保存: {filepath} (行数: {len(shard)})")
 
 
-def process_parquet(
-    input_dir: str, output_dir: str, char_limit: int = 10_000_000, shuffle: bool = False
+def process_parquet_stream(
+    input_dir: str,
+    output_dir: str,
+    char_limit: int = 10_000_000,
+    shuffle: bool = False,
+    batch_size: int = 10000,
 ) -> None:
     """
-    完整处理流程：
-    1. 加载所有 parquet 文件
-    2. 合并并打乱
-    3. 按字符数分片
-    4. 保存分片
+    流式处理完整流程。
     """
-    print("正在加载数据...")
-    df = load_parquet_files(input_dir)
-    print(f"加载完成，共 {len(df)} 行。")
+    print("正在扫描文件并统计行数...")
+    total_rows, file_infos = get_total_rows_and_file_info(input_dir)
+    print(f"总行数: {total_rows}")
 
-    df = shuffle_dataframe(df, shuffle)
+    if shuffle:
+        print("正在生成随机排列（存储于磁盘）...")
+        perm = generate_permutation_on_disk(total_rows, seed=42)
+        print("开始按随机顺序流式读取...")
+        row_iter = iter_shuffled_rows(perm, file_infos, batch_size)
+        # 使用完后删除排列文件（可选）
+        # os.remove('permutation.npy')
+    else:
+        # 不打乱时，按文件顺序逐行读取（流式）
+        def iter_sequential():
+            for info in file_infos:
+                pf = pq.ParquetFile(info["path"])
+                for rg in range(pf.metadata.num_row_groups):
+                    table = pf.read_row_group(rg, columns=["text"])
+                    df = table.to_pandas()
+                    for _, row in df.iterrows():
+                        yield row["text"]
+
+        row_iter = iter_sequential()
 
     print(f"正在按每 {char_limit} 字符进行分片...")
-    shards = split_by_char_count(df, char_limit)
+    shards = split_by_char_count_stream(row_iter, char_limit)
     print(f"分片完成，共产生 {len(shards)} 个分片。")
 
     print("正在保存分片...")
-    save_shards(shards, output_dir)
+    save_shards(shards, output_dir)  # 复用原 save_shards 函数
     print("全部完成！")
 
 
@@ -133,4 +207,4 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    process_parquet(args.input_dir, args.output_dir, args.char_limit, args.shuffle)
+    process_parquet_stream(args.input_dir, args.output_dir, args.char_limit, args.shuffle)
