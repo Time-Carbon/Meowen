@@ -1,5 +1,5 @@
 # 符号链接指向外部大容量目录
-c_dataset
+sub_dataset
 dataset
 
 # 模型文件：忽略权重，保留配置和分词器
