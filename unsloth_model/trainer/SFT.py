@@ -27,7 +27,7 @@ def modelTrainer(
         optim="paged_adamw_8bit",
         weight_decay=regularization,
         lr_scheduler_type="cosine_with_min_lr",
-        lr_scheduler_kwargs={"min_lr": 0.1 * lr, "num_cycles": 1.5 if cpt else 0.5},
+        lr_scheduler_kwargs={"min_lr": 0.1 * lr, "num_cycles": 2.5 if cpt else 0.5},
         max_length=max_SFT_context,
         eval_strategy="steps",
         eval_steps=eval_steps,
