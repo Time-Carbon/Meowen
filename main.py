@@ -86,7 +86,7 @@ def get_args():
 
     # 其他常用训练参数
     parser.add_argument(
-        "--regularization", type=float, default=0, help="权重衰减正则化系数"
+        "--weight_decay", type=float, default=0.01, help="权重衰减正则化系数"
     )
     parser.add_argument("--per_device_train_batch_size", type=int, default=8)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
@@ -160,7 +160,7 @@ if __name__ == "__main__":
         tokenizer=tokenizer,
         dataset=dataset,
         lr=args.lr,
-        regularization=args.regularization,
+        weight_decay=args.weight_decay,
         max_SFT_context=max_SFT_context,
         num_train_epochs=args.num_train_epochs,
         eval_steps=args.eval_steps,
