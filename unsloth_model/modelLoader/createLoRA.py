@@ -1,32 +1,17 @@
 from unsloth import FastLanguageModel
+from typing import Any, List
 
 
-def create_lora(model, rank):
+def create_lora(model: Any, rank: int, alpha: int | None, target_modules: List[str]):
 
     lora = FastLanguageModel.get_peft_model(
         model=model,
         r=rank,
-        lora_alpha=2 * rank,
+        lora_alpha=int(2 * rank) if alpha is not None else 1,
         lora_dropout=0.0,
         bias="none",
         use_gradient_checkpointing="unsloth",
-        target_modules=[
-            ### Attention
-            "in_proj_qkv",
-            "in_proj_z",
-            "in_proj_a",
-            "in_proj_b",
-            "out_proj",
-            ### The last attention layer of Qwen3.5
-            "q_proj",
-            "k_proj",
-            "v_proj",
-            "o_proj",
-            ### MLP
-            "gate_proj",
-            "up_proj",
-            "down_proj",
-        ],
+        target_modules=target_modules,
     )
 
     return lora

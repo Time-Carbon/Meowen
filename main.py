@@ -1,4 +1,5 @@
 import os
+from typing import Dict
 
 os.environ["UNSLOTH_USE_MODELSCOPE"] = "1"
 
@@ -9,7 +10,7 @@ max_SFT_context = 1
 ### Dataset process
 
 
-def make_CPT_conversation(dataset, tokenizer):
+def make_CPT_conversation(dataset, tokenizer) -> Dict:
 
     prompt = dataset["text"]
 
@@ -20,24 +21,19 @@ def make_CPT_conversation(dataset, tokenizer):
     return {"text": prompt}
 
 
-def make_SFT_conversation(dataset, tokenizer):
+def make_SFT_conversation(dataset, tokenizer) -> Dict:
 
     prompts = dataset["messages"]
     conversation = []
 
     for prompt in prompts:
         if prompt["role"] != "assistant":
-            conversation.append(
-                {
-                    "role": prompt["role"],
-                    "content": prompt["content"]
-                }
-            )
+            conversation.append({"role": prompt["role"], "content": prompt["content"]})
         else:
             conversation.append(
                 {
                     "role": "assistant",
-                    "content": f"<think>\n{prompt["reasoning"]}\n</think>\n\n{prompt["content"]}"
+                    "content": f"<think>\n{prompt["reasoning"]}\n</think>\n\n{prompt["content"]}",
                 }
             )
 
@@ -79,6 +75,7 @@ def get_args():
 
     # 训练超参数（题目要求重点提取的 lora_rank, epoch, learn_rate）
     parser.add_argument("--lora_rank", type=int, default=4, help="LoRA 秩 (rank)")
+    parser.add_argument("--lora_alpha", type=int, default=None, help="LoRA 秩 (rank)")
     parser.add_argument(
         "--num_train_epochs", type=int, default=1, help="训练轮数 (epoch)"
     )
@@ -91,7 +88,6 @@ def get_args():
     parser.add_argument("--per_device_train_batch_size", type=int, default=8)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--per_device_eval_batch_size", type=int, default=4)
-    parser.add_argument("--eval_accumulation_steps", type=int, default=4)
     parser.add_argument("--max_grad_norm", type=float, default=1.0)
     parser.add_argument("--eval_steps", type=int, default=400)
     parser.add_argument("--patience", type=int, default=0, help="早停 patience")
@@ -123,16 +119,33 @@ if __name__ == "__main__":
 
     model, tokenizer = um.import_model(args.model_path, 0.95, False)
 
-    if tokenizer.pad_token == "<|PAD_TOKEN|>":
+    if tokenizer.pad_token == "<|PAD_TOKEN|>" and args.continue_pretrain is True:
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
-    if args.lora == False:
-        lora = um.create_lora(model, args.lora_rank)
+    if args.lora is False:
+        target_modules = [
+            ### Attention
+            "in_proj_qkv",
+            "in_proj_z",
+            "in_proj_a",
+            "in_proj_b",
+            "out_proj",
+            ### The last attention layer of Qwen3.5
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            ### MLP
+            "gate_proj",
+            "up_proj",
+            "down_proj",
+        ]
+        lora = um.create_lora(model, args.lora_rank, args.lora_alpha, target_modules)
     else:
         lora = model
 
-    if args.continue_pretrain == False:
+    if args.continue_pretrain is False:
         dataset = um.load_data(
             path=args.dataset_path,
             tokenizer=tokenizer,
@@ -167,7 +180,7 @@ if __name__ == "__main__":
         per_device_train_batch_size=args.per_device_train_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         per_device_eval_batch_size=args.per_device_eval_batch_size,
-        eval_accumulation_steps=args.eval_accumulation_steps,
+        eval_accumulation_steps=2 * args.per_device_eval_batch_size,
         max_grad_norm=args.max_grad_norm,
         output_dir=args.lora_cache_path,
     )
