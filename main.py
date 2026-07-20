@@ -10,7 +10,7 @@ max_SFT_context = 1
 ### Dataset process
 
 
-def make_CPT_conversation(dataset, tokenizer) -> Dict:
+def make_CPT_conversation(dataset, tokenizer) -> Dict[str,str]:
 
     prompt = dataset["text"]
 
@@ -21,7 +21,7 @@ def make_CPT_conversation(dataset, tokenizer) -> Dict:
     return {"text": prompt}
 
 
-def make_SFT_conversation(dataset, tokenizer) -> Dict:
+def make_SFT_conversation(dataset, tokenizer) -> Dict[str,str]:
 
     prompts = dataset["messages"]
     conversation = []
