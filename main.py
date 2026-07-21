@@ -73,15 +73,13 @@ def get_args():
         "--lora_path", type=str, default="./lora_model", help="最终保存 LoRA 权重的路径"
     )
 
-    # 训练超参数（题目要求重点提取的 lora_rank, epoch, learn_rate）
+    # 训练超参数
     parser.add_argument("--lora_rank", type=int, default=4, help="LoRA 秩 (rank)")
-    parser.add_argument("--lora_alpha", type=int, default=None, help="LoRA 秩 (rank)")
+    parser.add_argument("--lora_scale", type=float, default=1.0, help="等价于LoRA Alpha / LoRA Rank")
     parser.add_argument(
         "--num_train_epochs", type=int, default=1, help="训练轮数 (epoch)"
     )
     parser.add_argument("--lr", type=float, default=5e-5, help="学习率 (learning rate)")
-
-    # 其他常用训练参数
     parser.add_argument(
         "--weight_decay", type=float, default=0.01, help="权重衰减正则化系数"
     )
@@ -141,7 +139,7 @@ if __name__ == "__main__":
             "up_proj",
             "down_proj",
         ]
-        lora = um.create_lora(model, args.lora_rank, args.lora_alpha, target_modules)
+        lora = um.create_lora(model, args.lora_rank, args.lora_scale, target_modules)
     else:
         lora = model
 
@@ -180,7 +178,7 @@ if __name__ == "__main__":
         per_device_train_batch_size=args.per_device_train_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         per_device_eval_batch_size=args.per_device_eval_batch_size,
-        eval_accumulation_steps=2 * args.per_device_eval_batch_size,
+        eval_accumulation_steps=int(2 * args.per_device_eval_batch_size),
         max_grad_norm=args.max_grad_norm,
         output_dir=args.lora_cache_path,
     )
