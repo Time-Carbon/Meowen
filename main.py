@@ -10,7 +10,7 @@ max_SFT_context = 1
 ### Dataset process
 
 
-def make_CPT_conversation(dataset, tokenizer) -> Dict[str,str]:
+def make_CPT_conversation(dataset, tokenizer) -> Dict[str, str]:
 
     prompt = dataset["text"]
 
@@ -21,7 +21,7 @@ def make_CPT_conversation(dataset, tokenizer) -> Dict[str,str]:
     return {"text": prompt}
 
 
-def make_SFT_conversation(dataset, tokenizer) -> Dict[str,str]:
+def make_SFT_conversation(dataset, tokenizer) -> Dict[str, str]:
 
     prompts = dataset["messages"]
     conversation = []
@@ -75,13 +75,24 @@ def get_args():
 
     # 训练超参数
     parser.add_argument("--lora_rank", type=int, default=4, help="LoRA 秩 (rank)")
-    parser.add_argument("--lora_scale", type=float, default=1.0, help="等价于LoRA Alpha / LoRA Rank")
     parser.add_argument(
-        "--num_train_epochs", type=int, default=1, help="训练轮数 (epoch)"
+        "--lora_scale", type=float, default=1.0, help="等价于LoRA Alpha / LoRA Rank"
+    )
+    parser.add_argument(
+        "--num_train_epochs", type=float, default=1.0, help="训练轮数 (epoch)"
+    )
+    parser.add_argument(
+        "--warmup_ratio", type=float, default=0.05, help="模型热身步数占比"
     )
     parser.add_argument("--lr", type=float, default=5e-5, help="学习率 (learning rate)")
     parser.add_argument(
         "--weight_decay", type=float, default=0.01, help="权重衰减正则化系数"
+    )
+    parser.add_argument(
+        "--adam_beta1", type=float, default=0.9, help="AdamW优化器的Beta1参数"
+    )
+    parser.add_argument(
+        "--adam_beta2", type=float, default=0.999, help="AdamW优化器的Beta2参数 (慎调)"
     )
     parser.add_argument("--per_device_train_batch_size", type=int, default=8)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
@@ -181,5 +192,8 @@ if __name__ == "__main__":
         eval_accumulation_steps=int(2 * args.per_device_eval_batch_size),
         max_grad_norm=args.max_grad_norm,
         output_dir=args.lora_cache_path,
+        adam_beta1=args.adam_beta1,
+        adam_beta2=args.adam_beta2,
+        warmup_steps=args.warmup_ratio,
     )
     um.save_lora(lora, tokenizer, args.lora_path)

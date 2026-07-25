@@ -22,9 +22,12 @@ def modelTrainer(
 
     train_args = SFTConfig(
         learning_rate=lr,
-        warmup_steps=0.05,
         bf16=is_bfloat16_supported(),
+        bf16_full_eval=is_bfloat16_supported(),
+        fp16=not is_bfloat16_supported(),
+        fp16_full_eval=not is_bfloat16_supported(),
         logging_steps=1,
+        torch_empty_cache_steps=8,
         optim="paged_adamw_8bit",
         lr_scheduler_type="cosine_with_min_lr",
         lr_scheduler_kwargs={"min_lr_rate": 0.01},
