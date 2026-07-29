@@ -2,11 +2,11 @@
 """
 Multi-agent conversation generator (v3).
 Key improvements:
-1. Full context preservation: opener is always visible to Agent A.
+1. Full context preservation: opener is always visible to Agent User.
 2. Perspective switching: each agent sees history from its own role
    (self -> assistant, partner -> user), preventing content confusion.
 3. Clean output: final conversation excludes system prompts and opener,
-   with Agent A as "user" and Agent B as "assistant".
+   with Agent User as "user" and Agent Assistant as "assistant".
 """
 
 import argparse
@@ -59,10 +59,10 @@ def parse_arguments() -> argparse.Namespace:
         help="Number of independent conversations to generate",
     )
     parser.add_argument(
-        "--prompt-a", required=True, help="Path to system prompt for Agent A (.txt)"
+        "--system-prompt-agent-user", required=True, help="Path to system prompt for Agent User (.txt)"
     )
     parser.add_argument(
-        "--prompt-b", required=True, help="Path to system prompt for Agent B (.txt)"
+        "--system-prompt-agent-assistant", required=True, help="Path to system prompt for Agent Assistant (.txt)"
     )
     parser.add_argument(
         "--opener", required=True, help="Path to CSV file containing opening lines"
@@ -164,8 +164,8 @@ def chat_completion(
 def generate_conversation(
     client: OpenAI,
     model: str,
-    prompt_a: str,
-    prompt_b: str,
+    system_prompt_agent_user: str,
+    system_prompt_agent_assistant: str,
     opener: Dict,
     turns: int = 10,
     top_p: float = 0.95,
@@ -177,12 +177,12 @@ def generate_conversation(
     """
     Generate a multi-turn conversation using perspective switching.
 
-    Agent A's perspective:
-        system: prompt_a
+    Agent User's perspective:
+        system: system_prompt_agent_user
         user: opener
         (assistant: A1, user: B1, assistant: A2, user: B2, ...)
-    Agent B's perspective:
-        system: prompt_b
+    Agent Userssistant's perspective:
+        system: system_prompt_agent_assistant
         user: A1
         (assistant: B1, user: A2, assistant: B2, ...)
 
@@ -209,29 +209,23 @@ def generate_conversation(
         },
     }
 
-    # Convert the opener to a JSON string for initializing Agent A's history.
-    opener_a = json.dumps(
+    # Convert the opener to a JSON string for initializing Agent User's history.
+    opener_user = json.dumps(
         {"query": opener["respond"]},
         ensure_ascii=False,
     )
 
     # Message histories for each agent, including system prompt and mapped roles
-    messages_a = [
-        {"role": "system", "content": prompt_a},
-        {"role": "user", "content": opener_a},
+    messages_agent_user = [
+        {"role": "system", "content": system_prompt_agent_user},
+        {"role": "user", "content": opener_user},
     ]
 
-    # Convert the opener to a JSON string for initializing Agent B's history.
-    opener_b = json_format_schema.model_dump_json(
-        json_format_schema(reasoning=opener["think"], responding=opener["respond"]),
-        ensure_ascii=False,
-    )
-    messages_b = [
+    messages_agent_assistant = [
         {
             "role": "system",
-            "content": f"{prompt_b}",
+            "content": f"{system_prompt_agent_assistant}",
         },
-        {"role": "assistant", "content": opener_b},
     ]
 
     # Final output
@@ -239,22 +233,17 @@ def generate_conversation(
         {
             "role": "system",
             "reasoning": "",
-            "content": prompt_a,
-        },
-        {
-            "role": "user",
-            "reasoning": "",
-            "content": opener["respond"],
+            "content": system_prompt_agent_user,
         },
     ]
 
     # 按照目标轮数生成对话
     for i in range(turns):
-        # Agent A generates a response (it sees itself as assistant)
-        response_a = chat_completion(
+        # Agent User generates a response (it sees itself as assistant)
+        response_agent_user = chat_completion(
             client,
             model,
-            messages_a,
+            messages_agent_user,
             temperature=temperature,
             frequency_penalty=frequency_penalty,
             top_p=top_p,
@@ -262,23 +251,23 @@ def generate_conversation(
             top_k=top_k,
             response_format=json_format,
         )
-        response_a = json_format_schema.model_validate_json(response_a)
+        response_agent_user = json_format_schema.model_validate_json(response_agent_user)
 
-        # Update A's history: its own reply is assistant
-        messages_a.append(
+        # Update User's history: its own reply is assistant
+        messages_agent_user.append(
             {
                 "role": "assistant",
                 "content": json_format_schema.model_dump_json(
-                    self=response_a, ensure_ascii=False
+                    self=response_agent_user, ensure_ascii=False
                 ),
             }
         )
-        # Update B's history: A's reply is user
-        messages_b.append(
+        # Update Assistant's history: User's reply is user
+        messages_agent_assistant.append(
             {
                 "role": "user",
                 "content": json.dumps(
-                    {"query": response_a.responding}, ensure_ascii=False
+                    {"query": response_agent_user.responding}, ensure_ascii=False
                 ),
             }
         )
@@ -286,18 +275,18 @@ def generate_conversation(
         # Record in output as user
         output_messages.append(
             {
-                "role": "assistant",
-                "reasoning": response_a.reasoning,
-                "content": response_a.responding,
+                "role": "user",
+                "reasoning": "",
+                "content": response_agent_user.responding,
             }
         )
 
-        # Agent B generates a response (it sees itself as assistant)
+        # Agent Assistant generates a response (it sees itself as assistant)
         if i < (turns - 1):
-            response_b = chat_completion(
+            response_agent_assistant = chat_completion(
                 client,
                 model,
-                messages_b,
+                messages_agent_assistant,
                 temperature=temperature,
                 frequency_penalty=frequency_penalty,
                 top_p=top_p,
@@ -305,23 +294,23 @@ def generate_conversation(
                 top_k=top_k,
                 response_format=json_format,
             )
-            response_b = json_format_schema.model_validate_json(response_b)
+            response_agent_assistant = json_format_schema.model_validate_json(response_agent_assistant)
 
-            # Update B's history: its own reply is assistant
-            messages_b.append(
+            # Update Assistant's history: its own reply is assistant
+            messages_agent_assistant.append(
                 {
                     "role": "assistant",
                     "content": json_format_schema.model_dump_json(
-                        self=response_b, ensure_ascii=False
+                        self=response_agent_assistant, ensure_ascii=False
                     ),
                 }
             )
-            # Update A's history: B's reply is user
-            messages_a.append(
+            # Update User's history: Assistant's reply is user
+            messages_agent_user.append(
                 {
                     "role": "user",
                     "content": json.dumps(
-                        {"query": response_b.responding}, ensure_ascii=False
+                        {"query": response_agent_assistant.responding}, ensure_ascii=False
                     ),
                 }
             )
@@ -329,9 +318,9 @@ def generate_conversation(
             # Record in output as assistant
             output_messages.append(
                 {
-                    "role": "user",
-                    "reasoning": "",
-                    "content": response_b.responding,
+                    "role": "assistant",
+                    "reasoning": response_agent_assistant.reasoning,
+                    "content": response_agent_assistant.responding,
                 }
             )
 
@@ -360,8 +349,8 @@ def main() -> None:
                 "API key not provided. Use --api-key or set OPENAI_API_KEY environment variable."
             )
 
-        prompt_a = load_text_file(args.prompt_a)
-        prompt_b = load_text_file(args.prompt_b)
+        system_prompt_agent_user = load_text_file(args.system_prompt_agent_user)
+        system_prompt_agent_assistant = load_text_file(args.system_prompt_agent_assistant)
         openers = load_openers(args.opener, skip_header=args.skip_header)
 
         os.makedirs(args.output_dir, exist_ok=True)
@@ -379,8 +368,8 @@ def main() -> None:
             conversation = generate_conversation(
                 client=client,
                 model=args.model,
-                prompt_a=prompt_a,
-                prompt_b=prompt_b,
+                system_prompt_agent_user=system_prompt_agent_user,
+                system_prompt_agent_assistant=system_prompt_agent_assistant,
                 opener=opener,
                 turns=args.turns,
                 temperature=args.temperature,
