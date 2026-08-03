@@ -59,10 +59,14 @@ def parse_arguments() -> argparse.Namespace:
         help="Number of independent conversations to generate",
     )
     parser.add_argument(
-        "--system-prompt-agent-user", required=True, help="Path to system prompt for Agent User (.txt)"
+        "--system-prompt-agent-user",
+        required=True,
+        help="Path to system prompt for Agent User (.txt)",
     )
     parser.add_argument(
-        "--system-prompt-agent-assistant", required=True, help="Path to system prompt for Agent Assistant (.txt)"
+        "--system-prompt-agent-assistant",
+        required=True,
+        help="Path to system prompt for Agent Assistant (.txt)",
     )
     parser.add_argument(
         "--opener", required=True, help="Path to CSV file containing opening lines"
@@ -96,7 +100,7 @@ def load_text_file(filepath: str) -> str:
 
 
 def load_openers(filepath: str, skip_header: bool = False) -> List[Dict[str, str]]:
-    """Load opening lines from a two‑column CSV (think, respond)."""
+    """Load opening lines from the first column CSV."""
     openers = []
     try:
         with open(filepath, "r", encoding="utf-8", newline="") as f:
@@ -108,8 +112,8 @@ def load_openers(filepath: str, skip_header: bool = False) -> List[Dict[str, str
                     raise SystemExit("CSV file is empty (no data after header).")
             for row in reader:
                 # 至少需要两列，且两列非空
-                if len(row) >= 2 and row[0].strip() and row[1].strip():
-                    openers.append({"think": row[0].strip(), "respond": row[1].strip()})
+                if len(row) >= 1 and row[0].strip():
+                    openers.append(row[0].strip())
     except Exception as e:
         raise SystemExit(f"Error loading openers from {filepath}: {e}")
     if not openers:
@@ -211,14 +215,17 @@ def generate_conversation(
 
     # Convert the opener to a JSON string for initializing Agent User's history.
     opener_user = json.dumps(
-        {"query": opener["respond"]},
+        {"query": opener},
         ensure_ascii=False,
     )
 
     # Message histories for each agent, including system prompt and mapped roles
     messages_agent_user = [
         {"role": "system", "content": system_prompt_agent_user},
-        {"role": "user", "content": opener_user},
+        {
+            "role": "user",
+            "content": json.dumps({"query": opener_user}, ensure_ascii=False),
+        },
     ]
 
     messages_agent_assistant = [
@@ -251,7 +258,9 @@ def generate_conversation(
             top_k=top_k,
             response_format=json_format,
         )
-        response_agent_user = json_format_schema.model_validate_json(response_agent_user)
+        response_agent_user = json_format_schema.model_validate_json(
+            response_agent_user
+        )
 
         # Update User's history: its own reply is assistant
         messages_agent_user.append(
@@ -282,56 +291,61 @@ def generate_conversation(
         )
 
         # Agent Assistant generates a response (it sees itself as assistant)
-        if i < (turns - 1):
-            response_agent_assistant = chat_completion(
-                client,
-                model,
-                messages_agent_assistant,
-                temperature=temperature,
-                frequency_penalty=frequency_penalty,
-                top_p=top_p,
-                min_p=min_p,
-                top_k=top_k,
-                response_format=json_format,
-            )
-            response_agent_assistant = json_format_schema.model_validate_json(response_agent_assistant)
+        response_agent_assistant = chat_completion(
+            client,
+            model,
+            messages_agent_assistant,
+            temperature=temperature,
+            frequency_penalty=frequency_penalty,
+            top_p=top_p,
+            min_p=min_p,
+            top_k=top_k,
+            response_format=json_format,
+        )
+        response_agent_assistant = json_format_schema.model_validate_json(
+            response_agent_assistant
+        )
 
-            # Update Assistant's history: its own reply is assistant
-            messages_agent_assistant.append(
-                {
-                    "role": "assistant",
-                    "content": json_format_schema.model_dump_json(
-                        self=response_agent_assistant, ensure_ascii=False
-                    ),
-                }
-            )
-            # Update User's history: Assistant's reply is user
-            messages_agent_user.append(
-                {
-                    "role": "user",
-                    "content": json.dumps(
-                        {"query": response_agent_assistant.responding}, ensure_ascii=False
-                    ),
-                }
-            )
+        # Update Assistant's history: its own reply is assistant
+        messages_agent_assistant.append(
+            {
+                "role": "assistant",
+                "content": json_format_schema.model_dump_json(
+                    self=response_agent_assistant, ensure_ascii=False
+                ),
+            }
+        )
+        # Update User's history: Assistant's reply is user
+        messages_agent_user.append(
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {"query": response_agent_assistant.responding}, ensure_ascii=False
+                ),
+            }
+        )
 
-            # Record in output as assistant
-            output_messages.append(
-                {
-                    "role": "assistant",
-                    "reasoning": response_agent_assistant.reasoning,
-                    "content": response_agent_assistant.responding,
-                }
-            )
+        # Record in output as assistant
+        output_messages.append(
+            {
+                "role": "assistant",
+                "reasoning": response_agent_assistant.reasoning,
+                "content": response_agent_assistant.responding,
+            }
+        )
 
     return output_messages
 
 
 def save_conversation(
-    conversation: List[Dict], output_dir: str, session_index: int
+    title: str,
+    conversation: List[Dict],
+    output_dir: str,
+    epoch: int,
+    turns: int,
 ) -> None:
     """Save a conversation to a JSON file."""
-    filename = f"session_{session_index:04d}.json"
+    filename = f"{title}_turn_{turns:02d}_{epoch:02d}.json"
     filepath = Path(output_dir) / filename
     conversation = {"messages": conversation}
 
@@ -350,18 +364,21 @@ def main() -> None:
             )
 
         system_prompt_agent_user = load_text_file(args.system_prompt_agent_user)
-        system_prompt_agent_assistant = load_text_file(args.system_prompt_agent_assistant)
+        system_prompt_agent_assistant = load_text_file(
+            args.system_prompt_agent_assistant
+        )
         openers = load_openers(args.opener, skip_header=args.skip_header)
 
         os.makedirs(args.output_dir, exist_ok=True)
 
         client = OpenAI(api_key=args.api_key, base_url=args.base_url)
 
+        epoch = 0
         for session_idx in range(args.num_sessions):
             opener = openers[session_idx % len(openers)]
             print(
                 f"Generating session {session_idx+1}/{args.num_sessions} "
-                f"with opener: {opener["respond"][:50]}...",
+                f"with opener: {opener[:50]}...",
                 flush=True,
             )
 
@@ -379,7 +396,16 @@ def main() -> None:
                 top_k=args.top_k,
             )
 
-            save_conversation(conversation, args.output_dir, session_idx + 1)
+            if session_idx % args.turns == 0:
+                epoch += 1
+
+            save_conversation(
+                opener[:5],
+                conversation,
+                args.output_dir,
+                epoch,
+                args.turns,
+            )
 
         print(f"All {args.num_sessions} sessions generated successfully.")
 
